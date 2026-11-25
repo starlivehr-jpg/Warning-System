@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, BriefcaseBusiness,
-  CheckCircle2, ChevronDown, ClipboardList, FileCheck2, FileText, LayoutDashboard,
-  LogOut, Search, Settings, ShieldCheck, Users, XCircle,
+  AlertTriangle, Bell, BriefcaseBusiness, CheckCircle2, ChevronDown, ClipboardList,
+  FileCheck2, FileText, LayoutDashboard, LogOut, Search, Settings, ShieldCheck, Users,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
