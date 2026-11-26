@@ -11,6 +11,19 @@ alter table public.profiles
 alter table public.warning_cases
   add column if not exists executive_ack_required boolean not null default false;
 
+drop policy if exists warnings_hr_insert on public.warning_cases;
+create policy warnings_authorized_insert on public.warning_cases for insert to authenticated
+with check (
+  created_by = (select auth.uid())
+  and (
+    private.has_any_role(array['system_admin','hr_officer']::public.app_role[])
+    or (
+      (select p.role::text from public.profiles p where p.id=(select auth.uid()) and p.is_active=true) = 'supervisor'
+      and warning_level = 'verbal'
+    )
+  )
+);
+
 create table if not exists public.warning_signatures (
   id uuid primary key default gen_random_uuid(),
   warning_id uuid not null references public.warning_cases(id) on delete restrict,
