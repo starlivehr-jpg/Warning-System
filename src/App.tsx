@@ -172,7 +172,7 @@ function App() {
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark small"><ShieldCheck size={22} /></div><div><strong>STAR LIVE</strong><span>WARNING SYSTEM</span></div></div>
       <div className="workspace-label">WORKSPACE</div>
-      <nav>{navItems.map(item => <button key={item.id} className={section === item.id ? "nav-item active" : "nav-item"} onClick={() => setSection(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === "approvals" && approvals.some(a => a.decision === "pending") && <i className="nav-dot" />}</button>)}</nav>
+      <nav>{navItems.map(item => <button key={item.id} className={section === item.id ? "nav-item active" : "nav-item"} onClick={() => setSection(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === "approvals" && approvals.filter(a => a.decision === "pending").length > 0 && <span className="pending-count">{approvals.filter(a => a.decision === "pending").length}</span>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="security-note"><ShieldCheck size={17} /><span>ระบบรักษาความปลอดภัย</span></div><button className="nav-item" onClick={signOut}><LogOut size={18} /><span>ออกจากระบบ</span></button></div>
     </aside>
     <main className="main-area">
