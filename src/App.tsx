@@ -272,7 +272,7 @@ function WarningsModule({ warnings, employees, profiles, canManage, profile, sig
       const { error: approvalError } = await supabase.from("warning_approvals").insert({ warning_id: data.id, approver_id: form.approver_id });
       if (approvalError) { await supabase.from("warning_cases").update({ status: "draft" }).eq("id", data.id); setError("สร้างรายการแล้ว แต่ส่งอนุมัติไม่สำเร็จ: " + approvalError.message); setBusy(false); return; }
     }
-    setBusy(false); setShowForm(false); setForm({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: "written_1", approver_id: "" }); setEvidence(null); onSaved();
+    setBusy(false); setShowForm(false); setForm({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: "written_1", approver_id: "", executive_ack_required: false }); setEvidence(null); onSaved();
   }
   async function sign(warningId: string, step: string) {
     if (!supabase) return;
