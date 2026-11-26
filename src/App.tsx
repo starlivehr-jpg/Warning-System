@@ -139,7 +139,7 @@ function App() {
     setDepartments((d.data || []) as Department[]);
     setProfiles((users.data || []) as Profile[]);
     setSignatures((sigs.data || []) as any[]);
-    const firstError = e.error || w.error || a.error || d.error;
+    const firstError = e.error || w.error || a.error || d.error || users.error || sigs.error;
     if (firstError) setError("โหลดข้อมูลบางส่วนไม่สำเร็จ: " + firstError.message);
     setLoading(false);
   }, [session]);
