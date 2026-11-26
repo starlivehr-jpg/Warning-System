@@ -102,26 +102,30 @@ create index warning_cases_incident_date_idx on public.warning_cases(incident_da
 create index warning_approvals_approver_idx on public.warning_approvals(approver_id, decision);
 create index audit_logs_created_at_idx on public.audit_logs(created_at desc);
 
-create or replace function public.current_app_role()
+create schema if not exists private;
+revoke all on schema private from public;
+grant usage on schema private to authenticated;
+
+create or replace function private.current_app_role()
 returns public.app_role
 language sql
 stable
 security definer
-set search_path = public
-as $$
-  select role from public.profiles
-  where id = auth.uid() and is_active = true
-$$;
+set search_path = ''
+as 'select p.role from public.profiles p where p.id = (select auth.uid()) and p.is_active = true';
 
-create or replace function public.has_any_role(allowed public.app_role[])
+create or replace function private.has_any_role(allowed public.app_role[])
 returns boolean
 language sql
 stable
 security definer
-set search_path = public
-as $$
-  select coalesce(public.current_app_role() = any(allowed), false)
-$$;
+set search_path = ''
+as 'select coalesce(private.current_app_role() = any(allowed), false)';
+
+revoke all on function private.current_app_role() from public, anon;
+revoke all on function private.has_any_role(public.app_role[]) from public, anon;
+grant execute on function private.current_app_role() to authenticated;
+grant execute on function private.has_any_role(public.app_role[]) to authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.departments enable row level security;
@@ -133,48 +137,46 @@ alter table public.audit_logs enable row level security;
 
 -- Profiles: users can read their own profile; administrators manage profiles.
 create policy "profiles_read_self_or_admin" on public.profiles for select to authenticated
-using (id = auth.uid() or public.has_any_role(array['system_admin']::public.app_role[]));
+using (id = auth.uid() or private.has_any_role(array['system_admin']::public.app_role[]));
 create policy "profiles_admin_manage" on public.profiles for all to authenticated
-using (public.has_any_role(array['system_admin']::public.app_role[]))
-with check (public.has_any_role(array['system_admin']::public.app_role[]));
+using (private.has_any_role(array['system_admin']::public.app_role[]))
+with check (private.has_any_role(array['system_admin']::public.app_role[]));
 
 create policy "departments_read_authenticated" on public.departments for select to authenticated
-using (public.current_app_role() is not null);
+using (private.current_app_role() is not null);
 create policy "departments_admin_hr_manage" on public.departments for all to authenticated
-using (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
-with check (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
+using (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
+with check (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
 
 create policy "employees_read_authorized" on public.employees for select to authenticated
-using (public.has_any_role(array['system_admin','hr_officer','approver','viewer']::public.app_role[]));
+using (private.has_any_role(array['system_admin','hr_officer','approver','viewer']::public.app_role[]));
 create policy "employees_hr_manage" on public.employees for all to authenticated
-using (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
-with check (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
+using (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
+with check (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
 
 create policy "warnings_read_authorized" on public.warning_cases for select to authenticated
-using (public.has_any_role(array['system_admin','hr_officer','approver','viewer']::public.app_role[]));
+using (private.has_any_role(array['system_admin','hr_officer','approver','viewer']::public.app_role[]));
 create policy "warnings_hr_insert" on public.warning_cases for insert to authenticated
-with check (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]) and created_by = auth.uid());
+with check (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]) and created_by = auth.uid());
 create policy "warnings_hr_update" on public.warning_cases for update to authenticated
-using (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
-with check (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
+using (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
+with check (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
 
 create policy "approvals_read_authorized" on public.warning_approvals for select to authenticated
-using (approver_id = auth.uid() or public.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
-create policy "approvals_assigned_insert" on public.warning_approvals for insert to authenticated
-with check (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]) or approver_id = auth.uid());
+using (approver_id = auth.uid() or private.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
+create policy "approvals_hr_assign" on public.warning_approvals for insert to authenticated
+with check (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
 create policy "approvals_assigned_update" on public.warning_approvals for update to authenticated
-using (approver_id = auth.uid() or public.has_any_role(array['system_admin']::public.app_role[]))
-with check (approver_id = auth.uid() or public.has_any_role(array['system_admin']::public.app_role[]));
+using (approver_id = auth.uid() or private.has_any_role(array['system_admin']::public.app_role[]))
+with check (approver_id = auth.uid() or private.has_any_role(array['system_admin']::public.app_role[]));
 
 create policy "attachments_read_authorized" on public.warning_attachments for select to authenticated
-using (public.has_any_role(array['system_admin','hr_officer','approver']::public.app_role[]));
+using (private.has_any_role(array['system_admin','hr_officer','approver']::public.app_role[]));
 create policy "attachments_hr_manage" on public.warning_attachments for all to authenticated
-using (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
-with check (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]) and uploaded_by = auth.uid());
+using (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]))
+with check (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]) and uploaded_by = auth.uid());
 
 create policy "audit_logs_read_admin_hr" on public.audit_logs for select to authenticated
-using (public.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
-create policy "audit_logs_insert_authenticated" on public.audit_logs for insert to authenticated
-with check (actor_id = auth.uid());
-
--- Audit rows are append-only: no UPDATE or DELETE policies are intentionally provided.
+using (private.has_any_role(array['system_admin','hr_officer']::public.app_role[]));
+-- Audit logs are written only by trusted server-side operations.
+-- No client INSERT/UPDATE/DELETE policies are provided.
