@@ -185,6 +185,7 @@ function App() {
       </section>
     </main>
     {toast && <div className="toast-message"><CheckCircle2 size={17} />{toast}</div>}
+    <footer className="app-footer no-print"><div>© 2026 Siam HRBP Soft· WARNING SYSTEM PRO (V1.0) &nbsp;| ติดต่อผู้พัฒนา LINE ID: <a href="https://line.me/ti/p/~dj_nodoubt" target="_blank" rel="noopener noreferrer">dj_nodoubt</a></div></footer>
   </div>;
 }
 
