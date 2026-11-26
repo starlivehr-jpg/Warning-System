@@ -281,10 +281,6 @@ function WarningsModule({ warnings, employees, profiles, canManage, profile, sig
     const { error } = await supabase.rpc("sign_warning", { p_warning_id: warningId, p_signature_step: step, p_signer_name: profile.full_name, p_consent_text: "ข้าพเจ้ายืนยันตัวตนและยินยอมลงนามอิเล็กทรอนิกส์ในหนังสือเตือนฉบับนี้" });
     if (error) window.alert("ลงนามไม่สำเร็จ: " + error.message); else onSaved();
   }
-  async function issue(id: string) {
-    if (!supabase) return; const { error: err } = await supabase.from("warning_cases").update({ status: "issued", issued_at: new Date().toISOString(), updated_by: userId }).eq("id", id);
-    if (err) setError(err.message); else onSaved();
-  }
   return <><div className="toolbar"><div><strong>ทะเบียนหนังสือเตือน</strong><span>{filtered.length} รายการ</span></div>{canCreate && <button className="primary-small" onClick={() => setShowForm(!showForm)}><Plus size={16} /> สร้างหนังสือเตือน</button>}</div>
     {showForm && <form className="form-panel" onSubmit={save}><div className="form-head"><strong>บันทึกเหตุการณ์และเสนออนุมัติ</strong><button type="button" className="close-btn" onClick={() => setShowForm(false)}><X size={17} /></button></div><div className="form-grid">
       <label className="span-2">พนักงาน<select required value={form.employee_id} onChange={e => setForm({ ...form, employee_id: e.target.value })}><option value="">เลือกพนักงาน</option>{employees.filter(x => x.status === "active").map(x => <option key={x.id} value={x.id}>{x.employee_code} · {x.first_name} {x.last_name}</option>)}</select></label>
