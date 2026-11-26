@@ -38,7 +38,8 @@ const navItems: { id: Section; label: string; icon: typeof LayoutDashboard }[] =
   { id: "settings", label: "ตั้งค่าระบบ", icon: Settings },
 ];
 const roleLabels: Record<Role, string> = {
-  system_admin: "ผู้ดูแลระบบ", hr_officer: "เจ้าหน้าที่บุคคล", approver: "ผู้อนุมัติ", viewer: "ผู้ดูข้อมูล",\n  supervisor: "หัวหน้างาน", hr_manager: "ผู้จัดการทรัพยากรบุคคล", executive: "ผู้บริหาร", employee: "พนักงาน",
+  system_admin: "ผู้ดูแลระบบ", hr_officer: "เจ้าหน้าที่บุคคล", approver: "ผู้อนุมัติ", viewer: "ผู้ดูข้อมูล",
+  supervisor: "หัวหน้างาน", hr_manager: "ผู้จัดการทรัพยากรบุคคล", executive: "ผู้บริหาร", employee: "พนักงาน",
 };
 const statusLabels: Record<string, string> = {
   active: "ปฏิบัติงาน", resigned: "ลาออก", terminated: "เลิกจ้าง", suspended: "พักงาน",
@@ -55,7 +56,8 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [password, setPassword] = useState("");\n  const [showPassword, setShowPassword] = useState(false);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -104,7 +106,8 @@ function App() {
   const [warnings, setWarnings] = useState<WarningCase[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);\n  const [signatures, setSignatures] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [signatures, setSignatures] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
@@ -125,7 +128,8 @@ function App() {
       supabase.from("warning_cases").select("id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").order("created_at", { ascending: false }),
       supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases(id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name").eq("is_active", true).order("name"),
-      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").order("full_name"),\n      supabase.from("warning_signatures").select("id,warning_id,signer_id,signature_step,signer_name,document_digest,signed_at").order("signed_at"),
+      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").order("full_name"),
+      supabase.from("warning_signatures").select("id,warning_id,signer_id,signature_step,signer_name,document_digest,signed_at").order("signed_at"),
     ]);
     if (p.error) setError("ไม่สามารถอ่านโปรไฟล์ผู้ใช้งานได้: " + p.error.message);
     setProfile(p.data as Profile | null);
@@ -133,7 +137,8 @@ function App() {
     setWarnings((w.data || []) as unknown as WarningCase[]);
     setApprovals((a.data || []) as unknown as Approval[]);
     setDepartments((d.data || []) as Department[]);
-    setProfiles((users.data || []) as Profile[]);\n    setSignatures((sigs.data || []) as any[]);
+    setProfiles((users.data || []) as Profile[]);
+    setSignatures((sigs.data || []) as any[]);
     const firstError = e.error || w.error || a.error || d.error;
     if (firstError) setError("โหลดข้อมูลบางส่วนไม่สำเร็จ: " + firstError.message);
     setLoading(false);
@@ -243,7 +248,8 @@ function EmployeesModule({ employees, departments, canManage, query, userId, onS
 function WarningsModule({ warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
   const [showForm, setShowForm] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [evidence, setEvidence] = useState<File | null>(null);
-  const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });\n  const canCreate = canManage || profile.role === "supervisor";
+  const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
+  const canCreate = canManage || profile.role === "supervisor";
   const filtered = warnings.filter(w => [w.case_number, w.category, w.incident_description, w.employees?.first_name || "", w.employees?.last_name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
   async function save(e: FormEvent) {
     e.preventDefault(); if (!supabase) return; setBusy(true); setError("");
@@ -382,7 +388,8 @@ function App() {
   const [warnings, setWarnings] = useState<WarningCase[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);\n  const [signatures, setSignatures] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [signatures, setSignatures] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
@@ -403,7 +410,8 @@ function App() {
       supabase.from("warning_cases").select("id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").order("created_at", { ascending: false }),
       supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases(id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name").eq("is_active", true).order("name"),
-      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").order("full_name"),\n      supabase.from("warning_signatures").select("id,warning_id,signer_id,signature_step,signer_name,document_digest,signed_at").order("signed_at"),
+      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").order("full_name"),
+      supabase.from("warning_signatures").select("id,warning_id,signer_id,signature_step,signer_name,document_digest,signed_at").order("signed_at"),
     ]);
     if (p.error) setError("ไม่สามารถอ่านโปรไฟล์ผู้ใช้งานได้: " + p.error.message);
     setProfile(p.data as Profile | null);
@@ -411,7 +419,8 @@ function App() {
     setWarnings((w.data || []) as unknown as WarningCase[]);
     setApprovals((a.data || []) as unknown as Approval[]);
     setDepartments((d.data || []) as Department[]);
-    setProfiles((users.data || []) as Profile[]);\n    setSignatures((sigs.data || []) as any[]);
+    setProfiles((users.data || []) as Profile[]);
+    setSignatures((sigs.data || []) as any[]);
     const firstError = e.error || w.error || a.error || d.error;
     if (firstError) setError("โหลดข้อมูลบางส่วนไม่สำเร็จ: " + firstError.message);
     setLoading(false);
@@ -520,7 +529,8 @@ function EmployeesModule({ employees, departments, canManage, query, userId, onS
 function WarningsModule({ warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
   const [showForm, setShowForm] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [evidence, setEvidence] = useState<File | null>(null);
-  const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });\n  const canCreate = canManage || profile.role === "supervisor";
+  const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
+  const canCreate = canManage || profile.role === "supervisor";
   const filtered = warnings.filter(w => [w.case_number, w.category, w.incident_description, w.employees?.first_name || "", w.employees?.last_name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
   async function save(e: FormEvent) {
     e.preventDefault(); if (!supabase) return; setBusy(true); setError("");
@@ -590,7 +600,8 @@ function ReportsModule({ employees, warnings }: { employees: Employee[]; warning
   const byStatus = Object.entries(statusLabels).map(([status, label]) => ({ status, label, count: warnings.filter(w => w.status === status).length })).filter(x => x.count);
   const downloadCsv = () => {
     const rows = [["เลขที่เอกสาร","รหัสพนักงาน","วันที่เกิดเหตุ","ประเภท","ระดับ","สถานะ"], ...warnings.map(w => [w.case_number, w.employees?.employee_code || "", w.incident_date, w.category, levelLabels[w.warning_level] || w.warning_level, statusLabels[w.status] || w.status])];
-    const csv = "\uFEFF" + rows.map(r => r.map(v => '"' + String(v).replaceAll('"','""') + '"').join(",")).join("\r\n");
+    const csv = "\uFEFF" + rows.map(r => r.map(v => '"' + String(v).replaceAll('"','""') + '"').join(",")).join("\r
+");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a"); a.href = url; a.download = "warning-report.csv"; a.click(); URL.revokeObjectURL(url);
   };
