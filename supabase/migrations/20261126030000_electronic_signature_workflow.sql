@@ -34,7 +34,7 @@ create policy warning_signatures_read_authorized
 on public.warning_signatures for select to authenticated
 using (
   signer_id = (select auth.uid())
-  or private.has_any_role(array['system_admin','hr_officer','hr_manager']::public.app_role[])
+  or exists (select 1 from public.profiles p where p.id=(select auth.uid()) and p.is_active=true and p.role::text in ('system_admin','hr_officer','hr_manager'))
 );
 
 revoke insert, update, delete on public.warning_signatures from anon, authenticated;
@@ -90,20 +90,20 @@ begin
   )::text,'UTF8'),'sha256'),'hex');
 
   if p_signature_step = 'issuer' then
-    if v_role not in ('supervisor','hr_officer') then raise exception 'Only supervisor or HR officer can sign as issuer'; end if;
-    if v_role = 'supervisor' and v_warning.warning_level <> 'verbal' then
+    if v_role::text not in ('supervisor','hr_officer') then raise exception 'Only supervisor or HR officer can sign as issuer'; end if;
+    if v_role::text = 'supervisor' and v_warning.warning_level <> 'verbal' then
       raise exception 'Supervisor may issue only a verbal warning recorded in writing';
     end if;
     if v_warning.status not in ('draft','approved') then raise exception 'Document is not ready for issuer signature'; end if;
   elsif p_signature_step = 'hr_manager_ack' then
-    if v_role <> 'hr_manager' then raise exception 'HR Manager role required'; end if;
+    if v_role::text <> 'hr_manager' then raise exception 'HR Manager role required'; end if;
     if not v_issuer then raise exception 'Issuer signature is required first'; end if;
   elsif p_signature_step = 'executive_ack' then
-    if v_role <> 'executive' then raise exception 'Executive role required'; end if;
+    if v_role::text <> 'executive' then raise exception 'Executive role required'; end if;
     if not v_warning.executive_ack_required then raise exception 'Executive acknowledgment was not requested for this document'; end if;
     if not v_issuer or not v_hr then raise exception 'Issuer and HR Manager signatures are required first'; end if;
   elsif p_signature_step = 'employee_ack' then
-    if v_role <> 'employee' or v_employee_id is distinct from v_warning.employee_id then
+    if v_role::text <> 'employee' or v_employee_id is distinct from v_warning.employee_id then
       raise exception 'Only the employee assigned to this warning can acknowledge it';
     end if;
     if not v_issuer or not v_hr then raise exception 'Issuer and HR Manager signatures are required first'; end if;
