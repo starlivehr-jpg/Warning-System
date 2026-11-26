@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  AlertTriangle, Bell, BriefcaseBusiness, CheckCircle2, ChevronDown, ClipboardList,
+  AlertTriangle, CheckCircle2, ChevronDown, ClipboardList,
   FileCheck2, FileText, LayoutDashboard, LogOut, Plus, Search, Settings, ShieldCheck,
-  Users, X, RefreshCw, UserPlus, LockKeyhole, Download, Clock3,
+  Users, X, RefreshCw, LockKeyhole, Download,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -178,7 +178,7 @@ function App() {
         {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={setSection} />}
         {section === "employees" && <EmployeesModule employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
         {section === "warnings" && <WarningsModule warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
-        {section === "approvals" && <ApprovalsModule approvals={approvals} userId={session.user.id} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
+        {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
         {section === "settings" && <SettingsModule profile={profile} profiles={profiles} onRoleChange={updateEmployeeRole} onBootstrap={loadData} />}
       </section>
@@ -270,7 +270,7 @@ function WarningsModule({ warnings, employees, profiles, canManage, query, userI
   </>;
 }
 
-function ApprovalsModule({ approvals, userId, canManage, onSaved }: { approvals: Approval[]; userId: string; canManage: boolean; onSaved: () => void }) {
+function ApprovalsModule({ approvals, canManage, onSaved }: { approvals: Approval[]; canManage: boolean; onSaved: () => void }) {
   const [busyId, setBusyId] = useState("");
   async function decide(id: string, decision: "approved" | "rejected") {
     if (!supabase) return; setBusyId(id);
