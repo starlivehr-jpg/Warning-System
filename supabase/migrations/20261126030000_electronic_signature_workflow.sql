@@ -41,6 +41,19 @@ create index if not exists warning_signatures_signer_idx
 create index if not exists warning_signatures_warning_idx
   on public.warning_signatures(warning_id, signed_at);
 
+drop policy if exists warnings_read_authorized on public.warning_cases;
+create policy warnings_read_authorized on public.warning_cases for select to authenticated
+using (
+  exists (
+    select 1 from public.profiles p
+    where p.id=(select auth.uid()) and p.is_active=true
+      and (
+        p.role::text in ('system_admin','hr_officer','approver','viewer','supervisor','hr_manager','executive')
+        or (p.role::text='employee' and p.employee_id=warning_cases.employee_id)
+      )
+  )
+);
+
 alter table public.warning_signatures enable row level security;
 drop policy if exists warning_signatures_read_authorized on public.warning_signatures;
 create policy warning_signatures_read_authorized
