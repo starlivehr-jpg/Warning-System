@@ -38,7 +38,7 @@ const navItems: { id: Section; label: string; icon: typeof LayoutDashboard }[] =
   { id: "settings", label: "ตั้งค่าระบบ", icon: Settings },
 ];
 const roleLabels: Record<Role, string> = {
-  system_admin: "ผู้ดูแลระบบ", hr_officer: "เจ้าหน้าที่ HR", approver: "ผู้อนุมัติ", viewer: "ผู้ดูข้อมูล",
+  system_admin: "ผู้ดูแลระบบ", hr_officer: "เจ้าหน้าที่บุคคล", approver: "ผู้อนุมัติ", viewer: "ผู้ดูข้อมูล",\n  supervisor: "หัวหน้างาน", hr_manager: "ผู้จัดการทรัพยากรบุคคล", executive: "ผู้บริหาร", employee: "พนักงาน",
 };
 const statusLabels: Record<string, string> = {
   active: "ปฏิบัติงาน", resigned: "ลาออก", terminated: "เลิกจ้าง", suspended: "พักงาน",
