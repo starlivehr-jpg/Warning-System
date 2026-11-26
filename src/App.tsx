@@ -21,6 +21,7 @@ type WarningCase = {
   id: string; case_number: string; employee_id: string; incident_date: string;
   category: string; incident_description: string; warning_level: string; status: string;
   created_at: string; employees?: { employee_code: string; first_name: string; last_name: string } | null;
+  warning_attachments?: { id: string; storage_path: string; original_file_name: string }[];
 };
 type Approval = {
   id: string; warning_id: string; decision: string; comments: string | null;
@@ -121,7 +122,7 @@ function App() {
     const [p, e, w, a, d, users] = await Promise.all([
       supabase.from("profiles").select("id,full_name,role,is_active").eq("id", session.user.id).maybeSingle(),
       supabase.from("employees").select("id,employee_code,first_name,last_name,department_id,job_title,status,employment_start_date,departments(name)").order("created_at", { ascending: false }),
-      supabase.from("warning_cases").select("id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name)").order("created_at", { ascending: false }),
+      supabase.from("warning_cases").select("id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").order("created_at", { ascending: false }),
       supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases(id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name").eq("is_active", true).order("name"),
       supabase.from("profiles").select("id,full_name,role,is_active").order("full_name"),
@@ -236,10 +237,12 @@ function EmployeesModule({ employees, departments, canManage, query, userId, onS
 
 function WarningsModule({ warnings, employees, profiles, canManage, query, userId, onSaved }: { warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; query: string; userId: string; onSaved: () => void }) {
   const [showForm, setShowForm] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const [evidence, setEvidence] = useState<File | null>(null);
   const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: "written_1", approver_id: "" });
   const filtered = warnings.filter(w => [w.case_number, w.category, w.incident_description, w.employees?.first_name || "", w.employees?.last_name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
   async function save(e: FormEvent) {
     e.preventDefault(); if (!supabase) return; setBusy(true); setError("");
+    if (evidence && (evidence.size > 10 * 1024 * 1024 || !["application/pdf","image/png","image/jpeg"].includes(evidence.type))) { setError("ไฟล์หลักฐานต้องเป็น PDF/JPG/PNG และมีขนาดไม่เกิน 10 MB"); setBusy(false); return; }
     const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
     const { data, error: err } = await supabase.from("warning_cases").insert({
       case_number: caseNumber, employee_id: form.employee_id, incident_date: form.incident_date,
@@ -247,11 +250,19 @@ function WarningsModule({ warnings, employees, profiles, canManage, query, userI
       warning_level: form.warning_level, status: form.approver_id ? "pending_approval" : "draft", created_by: userId,
     }).select("id").single();
     if (err) { setError(err.message); setBusy(false); return; }
+    if (evidence) {
+      const safeName = evidence.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storagePath = data.id + "/" + Date.now() + "-" + safeName;
+      const { error: uploadError } = await supabase.storage.from("warning-evidence").upload(storagePath, evidence, { contentType: evidence.type, upsert: false });
+      if (uploadError) { setError("บันทึกหนังสือเตือนแล้ว แต่แนบไฟล์ไม่สำเร็จ: " + uploadError.message); setBusy(false); return; }
+      const { error: metaError } = await supabase.from("warning_attachments").insert({ warning_id: data.id, storage_path: storagePath, original_file_name: evidence.name, mime_type: evidence.type, file_size_bytes: evidence.size, uploaded_by: userId });
+      if (metaError) { await supabase.storage.from("warning-evidence").remove([storagePath]); setError("อัปโหลดไฟล์แล้วแต่บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + metaError.message); setBusy(false); return; }
+    }
     if (form.approver_id) {
       const { error: approvalError } = await supabase.from("warning_approvals").insert({ warning_id: data.id, approver_id: form.approver_id });
       if (approvalError) { await supabase.from("warning_cases").update({ status: "draft" }).eq("id", data.id); setError("สร้างรายการแล้ว แต่ส่งอนุมัติไม่สำเร็จ: " + approvalError.message); setBusy(false); return; }
     }
-    setBusy(false); setShowForm(false); setForm({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: "written_1", approver_id: "" }); onSaved();
+    setBusy(false); setShowForm(false); setForm({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: "written_1", approver_id: "" }); setEvidence(null); onSaved();
   }
   async function issue(id: string) {
     if (!supabase) return; const { error: err } = await supabase.from("warning_cases").update({ status: "issued", issued_at: new Date().toISOString(), updated_by: userId }).eq("id", id);
@@ -265,10 +276,13 @@ function WarningsModule({ warnings, employees, profiles, canManage, query, userI
       <label>ระดับการเตือน<select value={form.warning_level} onChange={e => setForm({ ...form, warning_level: e.target.value })}>{Object.entries(levelLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
       <label>ผู้อนุมัติ<select value={form.approver_id} onChange={e => setForm({ ...form, approver_id: e.target.value })}><option value="">บันทึกเป็นฉบับร่าง</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.full_name} ({roleLabels[p.role]})</option>)}</select></label>
       <label className="span-2">รายละเอียดเหตุการณ์<textarea required rows={4} value={form.incident_description} onChange={e => setForm({ ...form, incident_description: e.target.value })} /></label>
+      <label className="span-2">แนบหลักฐาน (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e => setEvidence(e.target.files?.[0] || null)} /></label>
     </div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !employees.length}>{busy ? "กำลังบันทึก..." : "บันทึกข้อมูล"}</button>{!employees.length && <p className="small-note">กรุณาเพิ่มข้อมูลพนักงานก่อนสร้างหนังสือเตือน</p>}</form>}
-    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td>{canManage && w.status === "approved" ? <button className="table-action" onClick={() => void issue(w.id)}>ออกหนังสือ</button> : "—"}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
+    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td>{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{canManage && w.status === "approved" && <button className="table-action" onClick={() => void issue(w.id)}>ออกหนังสือ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
   </>;
 }
+
+async function openEvidence(path: string) { if (!supabase) return; const { data, error } = await supabase.storage.from("warning-evidence").createSignedUrl(path, 60); if (error) window.alert("เปิดไฟล์ไม่สำเร็จ: " + error.message); else window.open(data.signedUrl, "_blank", "noopener,noreferrer"); }
 
 function ApprovalsModule({ approvals, canManage, onSaved }: { approvals: Approval[]; canManage: boolean; onSaved: () => void }) {
   const [busyId, setBusyId] = useState("");
