@@ -41,6 +41,7 @@ create index if not exists warning_signatures_signer_idx
 create index if not exists warning_signatures_warning_idx
   on public.warning_signatures(warning_id, signed_at);
 
+drop policy if exists warnings_select_authorized on public.warning_cases;
 drop policy if exists warnings_read_authorized on public.warning_cases;
 create policy warnings_read_authorized on public.warning_cases for select to authenticated
 using (
@@ -117,9 +118,6 @@ begin
 
   if p_signature_step = 'issuer' then
     if v_role::text not in ('supervisor','hr_officer') then raise exception 'Only supervisor or HR officer can sign as issuer'; end if;
-    if v_role::text = 'supervisor' and v_warning.warning_level <> 'verbal' then
-      raise exception 'Supervisor may issue only a verbal warning recorded in writing';
-    end if;
     if v_warning.status not in ('draft','approved') then raise exception 'Document is not ready for issuer signature'; end if;
   elsif p_signature_step = 'hr_manager_ack' then
     if v_role::text <> 'hr_manager' then raise exception 'HR Manager role required'; end if;
