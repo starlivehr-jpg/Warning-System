@@ -428,9 +428,10 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
   onCreateUser: (input: AdminUserInput) => Promise<void>; onResetPassword: (userId: string, newPassword: string) => Promise<void>;
   onBootstrap: () => Promise<void>;
 }) {
+  const initialCompany = companies.find(company => company.company_code === "STARLIVE") || companies[0];
   const [newUser, setNewUser] = useState<AdminUserInput>({
     full_name: "", email: "", password: "", role: "viewer", employee_id: null,
-    company_ids: companies[0] ? [companies[0].id] : [], default_company_id: companies[0]?.id || "",
+    company_ids: initialCompany ? [initialCompany.id] : [], default_company_id: initialCompany?.id || "",
   });
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -442,7 +443,7 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
     setCreateBusy(true); setCreateError("");
     try {
       await onCreateUser(newUser);
-      setNewUser({ full_name: "", email: "", password: "", role: "viewer", employee_id: null, company_ids: companies[0] ? [companies[0].id] : [], default_company_id: companies[0]?.id || "" });
+      setNewUser({ full_name: "", email: "", password: "", role: "viewer", employee_id: null, company_ids: initialCompany ? [initialCompany.id] : [], default_company_id: initialCompany?.id || "" });
     } catch (createFailure) {
       setCreateError(createFailure instanceof Error ? createFailure.message : "สร้างบัญชีไม่สำเร็จ");
     } finally { setCreateBusy(false); }
