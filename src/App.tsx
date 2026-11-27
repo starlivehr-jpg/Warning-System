@@ -473,13 +473,20 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
     const { data: attachmentRows, error: attachmentQueryError } = await supabase.from("warning_attachments").select("storage_path").eq("warning_id", warning.id);
     if (attachmentQueryError) { setBusy(false); window.alert("ตรวจสอบไฟล์แนบไม่สำเร็จ: " + attachmentQueryError.message); return; }
     const paths = (attachmentRows || []).map(a => a.storage_path).filter(Boolean);
+    // Delete the database record first. Never remove evidence files if the
+    // audited System Admin deletion is rejected by the database.
+    const { error: deleteError } = await supabase.rpc("admin_delete_warning", { p_warning_id: warning.id });
+    if (deleteError) { setBusy(false); window.alert("ลบหนังสือเตือนไม่สำเร็จ: " + deleteError.message); return; }
     if (paths.length) {
       const { error: storageError } = await supabase.storage.from("warning-evidence").remove(paths);
-      if (storageError) { setBusy(false); window.alert("ลบไฟล์แนบไม่สำเร็จ จึงยกเลิกการลบหนังสือเตือน: " + storageError.message); return; }
+      if (storageError) {
+        setBusy(false);
+        window.alert("ลบรายการหนังสือเตือนแล้ว แต่มีไฟล์แนบในพื้นที่จัดเก็บที่ต้องตรวจสอบ: " + storageError.message);
+        onSaved();
+        return;
+      }
     }
-    const { error: deleteError } = await supabase.rpc("admin_delete_warning", { p_warning_id: warning.id });
     setBusy(false);
-    if (deleteError) { window.alert("ลบหนังสือเตือนไม่สำเร็จ: " + deleteError.message + "\nกรุณาตรวจสอบไฟล์แนบใน Storage เนื่องจากไฟล์อาจถูกลบไปแล้ว"); return; }
     if (previewWarning?.id === warning.id) setPreviewWarning(null);
     window.alert("ลบหนังสือเตือน " + warning.case_number + " เรียบร้อยแล้ว");
     onSaved();
@@ -604,10 +611,116 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
 }
 
 
+type RegulationParagraph = { number: string; text: string; kind: "title" | "heading" | "body"; indent: number };
+async function readZipText(blob: Blob, wanted: string): Promise<string | null> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const view = new DataView(bytes.buffer);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65558); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return null;
+  const count = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+  for (let i = 0; i < count; i++) {
+    if (view.getUint32(offset, true) !== 0x02014b50) return null;
+    const method = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+    if (name === wanted) {
+      const dataOffset = localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
+      const compressed = bytes.slice(dataOffset, dataOffset + compressedSize);
+      let data: Uint8Array;
+      if (method === 0) data = compressed;
+      else if (method === 8) {
+        const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw" as CompressionFormat));
+        data = new Uint8Array(await new Response(stream).arrayBuffer());
+      } else return null;
+      return new TextDecoder().decode(data);
+    }
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return null;
+}
+function resolveDocxParagraphs(documentXml: string, numberingXml: string): RegulationParagraph[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(documentXml, "application/xml");
+  const numbering = parser.parseFromString(numberingXml, "application/xml");
+  const get = (node: Element | Document, name: string) => node.getElementsByTagNameNS("*", name);
+  const abstract = new Map<string, Map<number, { text: string; format: string }>>();
+  for (const abs of Array.from(get(numbering, "abstractNum"))) {
+    const id = abs.getAttribute("abstractNumId") || "";
+    const levels = new Map<number, { text: string; format: string }>();
+    for (const lvl of Array.from(get(abs, "lvl"))) {
+      const level = Number(lvl.getAttribute("ilvl") || 0);
+      levels.set(level, { text: get(lvl, "lvlText")[0]?.getAttribute("val") || "", format: get(lvl, "numFmt")[0]?.getAttribute("val") || "decimal" });
+    }
+    abstract.set(id, levels);
+  }
+  const nums = new Map<string, Map<number, { text: string; format: string }>>();
+  for (const num of Array.from(get(numbering, "num"))) {
+    const id = num.getAttribute("numId") || "";
+    const absId = get(num, "abstractNumId")[0]?.getAttribute("val") || "";
+    nums.set(id, abstract.get(absId) || new Map());
+  }
+  const counters = new Map<string, number[]>();
+  const paragraphs: RegulationParagraph[] = [];
+  for (const p of Array.from(get(doc, "p"))) {
+    const text = Array.from(get(p, "t")).map(t => t.textContent || "").join("").trim();
+    if (!text) continue;
+    const numPr = get(p, "numPr")[0];
+    const numId = numPr ? get(numPr, "numId")[0]?.getAttribute("val") || "" : "";
+    const ilvl = numPr ? Number(get(numPr, "ilvl")[0]?.getAttribute("val") || 0) : -1;
+    let number = "";
+    if (numId && nums.has(numId) && ilvl >= 0) {
+      const levels = nums.get(numId)!;
+      const values = counters.get(numId) || [];
+      values[ilvl] = (values[ilvl] || 0) + 1;
+      values.length = ilvl + 1;
+      counters.set(numId, values);
+      const pattern = levels.get(ilvl)?.text || "";
+      number = pattern.replace(/%(\d+)/g, (_match, n: string) => String(values[Number(n) - 1] || 1));
+    }
+    const style = get(p, "pStyle")[0]?.getAttribute("val") || "";
+    const indent = Number(get(p, "ind")[0]?.getAttribute("left") || 0);
+    const kind = /title/i.test(style) ? "title" : /heading/i.test(style) || /^ข้อ\s*\d/.test(text) ? "heading" : "body";
+    paragraphs.push({ number, text, kind, indent });
+  }
+  return paragraphs;
+}
+async function loadRegulationSource(doc: RegulationDocument): Promise<RegulationParagraph[] | null> {
+  if (!supabase || !doc.storage_path) return null;
+  const { data, error } = await supabase.storage.from("company-regulations").download(doc.storage_path);
+  if (error || !data) return null;
+  const documentXml = await readZipText(data, "word/document.xml");
+  if (!documentXml) return null;
+  const numberingXml = await readZipText(data, "word/numbering.xml") || "<numbering/>";
+  return resolveDocxParagraphs(documentXml, numberingXml);
+}
+
 function RegulationsModule({ categories, documents, sections, query, onQueryChange }: {
   categories: RegulationCategory[]; documents: RegulationDocument[]; sections: RegulationSection[];
   query: string; onQueryChange: (value: string) => void;
 }) {
+  const [sourceParagraphs, setSourceParagraphs] = useState<Record<string, RegulationParagraph[]>>({});
+  const [sourceLoading, setSourceLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    setSourceLoading(true);
+    Promise.all(documents.map(async doc => [doc.id, await loadRegulationSource(doc)] as const))
+      .then(results => {
+        if (cancelled) return;
+        const mapped: Record<string, RegulationParagraph[]> = {};
+        for (const [id, paragraphs] of results) if (paragraphs?.length) mapped[id] = paragraphs;
+        setSourceParagraphs(mapped);
+      })
+      .finally(() => { if (!cancelled) setSourceLoading(false); });
+    return () => { cancelled = true; };
+  }, [documents]);
   const [selectedCategory, setSelectedCategory] = useState("all");
   const filtered = sections.filter(item => {
     const doc = documents.find(entry => entry.id === item.document_id);
@@ -626,8 +739,15 @@ function RegulationsModule({ categories, documents, sections, query, onQueryChan
         {visibleDocuments.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || "เอกสารข้อบังคับ"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "พร้อมอ่าน"}</span></div></div>)}
         {!visibleDocuments.length && <EmptyState title="ไม่พบเอกสารในหมวดนี้" detail="ลองเลือกหมวดอื่นหรือค้นหาด้วยคำสำคัญ" />}
       </aside>
-      <section className="regulation-results"><div className="section-title"><div><h2>ผลการค้นหาและเนื้อหาข้อบังคับ</h2><p>{filtered.length} รายการ {query ? "ตรงกับคำค้น" : "ในหมวดที่เลือก"}</p></div></div>
-        {filtered.map(item => <article className="panel regulation-section" key={item.id}><div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === item.category_code)?.category_name_th || item.category_code}</span><h3>{item.heading}</h3><small>{item.section_number || "—"} · {documents.find(doc => doc.id === item.document_id)?.title || "เอกสารต้นฉบับ"}</small></div></div><div className="regulation-content">{item.content_text}</div></article>)}
+      <section className="regulation-results"><div className="section-title"><div><h2>ผลการค้นหาและเนื้อหาข้อบังคับ</h2><p>{filtered.length} รายการ {query ? "ตรงกับคำค้น" : "ในหมวดที่เลือก"}{sourceLoading ? " · กำลังจัดรูปแบบจากต้นฉบับ Word" : ""}</p></div></div>
+        {filtered.map(item => <article className="panel regulation-section" key={item.id}><div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === item.category_code)?.category_name_th || item.category_code}</span><h3>{item.heading}</h3><small>{item.section_number || "—"} · {documents.find(doc => doc.id === item.document_id)?.title || "เอกสารต้นฉบับ"}</small></div></div><div className="regulation-content regulation-document-page">
+          {sourceParagraphs[item.document_id]?.length ? sourceParagraphs[item.document_id].map((paragraph, index) =>
+            <div className={`regulation-paragraph ${paragraph.kind}`} key={index} style={{ paddingLeft: paragraph.indent ? Math.min(paragraph.indent / 20, 72) : undefined }}>
+              {paragraph.number && <span className="regulation-number">{paragraph.number}</span>}
+              <span className="regulation-paragraph-text">{paragraph.text}</span>
+            </div>
+          ) : <div className="regulation-fallback-text">{item.content_text}</div>}
+        </div></article>)}
         {!filtered.length && <EmptyState title="ไม่พบเนื้อหาข้อบังคับ" detail="ลองเปลี่ยนหมวดหรือคำค้นหา" />}
       </section>
     </div>
