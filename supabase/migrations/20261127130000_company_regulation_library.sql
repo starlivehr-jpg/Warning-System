@@ -41,6 +41,19 @@ create table if not exists public.regulation_documents (
   updated_at timestamptz not null default now()
 );
 
+do $
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname='regulation_documents_id_company_unique'
+      and conrelid='public.regulation_documents'::regclass
+  ) then
+    alter table public.regulation_documents
+      add constraint regulation_documents_id_company_unique unique (id, company_id);
+  end if;
+end;
+$;
+
 create table if not exists public.regulation_sections (
   id uuid primary key default gen_random_uuid(),
   document_id uuid not null references public.regulation_documents(id) on delete cascade,
@@ -59,16 +72,12 @@ create table if not exists public.regulation_sections (
     on delete cascade
 );
 
-create unique index if not exists regulation_documents_id_company_unique
-on public.regulation_documents(id,company_id);
 create index if not exists regulation_documents_company_idx
 on public.regulation_documents(company_id,created_at desc);
 create index if not exists regulation_sections_company_category_idx
 on public.regulation_sections(company_id,category_code,sort_order);
 create index if not exists regulation_sections_document_idx
 on public.regulation_sections(document_id,sort_order);
-create index if not exists regulation_sections_content_trgm_idx
-on public.regulation_sections using gin (content_text gin_trgm_ops);
 
 alter table public.regulation_documents enable row level security;
 alter table public.regulation_sections enable row level security;
