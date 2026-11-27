@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BookOpen, Search, UserRound, FileText, Building2, Upload } from "lucide-react";
+import { Search, UserRound, Building2, Upload } from "lucide-react";
 export type WarningLetterFormValue = { employee_id:string; incident_date:string; incident_time:string; incident_location:string; category:string; incident_description:string; employee_explanation:string; proposed_action:string; regulation_text:string; warning_level:string; approver_id:string; executive_ack_required:boolean };
 type EmployeeOption={id:string;employee_code:string;first_name:string;last_name:string;job_title:string|null;status?:string;departments?:{name:string}|null};
 type RegulationOption={id:string;section_number:string|null;heading:string;content_text:string;category_code:string;document_id:string};
