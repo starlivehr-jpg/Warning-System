@@ -274,3 +274,58 @@
 .source-regulation-options>label span{display:flex;flex-direction:column;gap:2px;min-width:0}
 .source-regulation-options b{font-size:11px;color:#25384c}.source-regulation-options small{font-size:10px;color:#7b8b9b}.source-regulation-options em{font-size:10px;color:#53677b;font-style:normal;line-height:1.35}
 @media(max-width:760px){.source-regulation-options{grid-template-columns:1fr}}
+
+
+/* Desktop warning composer: keep the original A4 sheet on the left and move
+   connected workflow controls into the adjacent right-hand sidebar. */
+@media (min-width: 1200px) {
+  .warning-letter-form-panel {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .warning-letter-form-panel .source-letter-workspace {
+    display: grid;
+    grid-template-columns: minmax(794px, 210mm) minmax(320px, 360px);
+    align-items: start;
+    justify-content: center;
+    gap: 16px;
+    width: 100%;
+    overflow-x: auto;
+  }
+  .warning-letter-form-panel .source-template-iframe {
+    grid-column: 1;
+    grid-row: 1;
+    width: 210mm;
+    min-width: 794px;
+    max-width: none;
+    height: 1320px;
+  }
+  .warning-letter-form-panel .source-workflow-controls {
+    grid-column: 2;
+    grid-row: 1;
+    width: 100%;
+    max-height: calc(100vh - 150px);
+    overflow-y: auto;
+    position: sticky;
+    top: 12px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+  .warning-letter-form-panel .source-workflow-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+}
+@media (max-width: 1199px) {
+  .warning-letter-form-panel .source-letter-workspace {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .warning-letter-form-panel .source-workflow-controls {
+    order: 0;
+  }
+  .warning-letter-form-panel .source-template-iframe {
+    order: 1;
+  }
+}
