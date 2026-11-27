@@ -95,7 +95,11 @@ Deno.serve(async (req: Request) => {
       return json(500, { error: "User profile setup failed: " + profileError.message });
     }
 
-    await admin.from("user_company_access").delete().eq("profile_id", newUserId);
+    const { error: clearAccessError } = await admin.from("user_company_access").delete().eq("profile_id", newUserId);
+    if (clearAccessError) {
+      await admin.auth.admin.deleteUser(newUserId);
+      return json(500, { error: "Could not reset default company access: " + clearAccessError.message });
+    }
     const { error: accessError } = await admin.from("user_company_access").insert(
       companyIds.map((companyId: string) => ({ profile_id: newUserId, company_id: companyId }))
     );
