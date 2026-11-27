@@ -13,6 +13,7 @@ type Role = "system_admin" | "hr_officer" | "approver" | "viewer" | "supervisor"
 type Profile = { id: string; full_name: string; role: Role; is_active: boolean; employee_id?: string | null; default_company_id?: string | null };
 type Company = { id: string; company_code: string; company_name: string };
 type CompanyAccess = { profile_id: string; company_id: string };
+type AdminUserInput = { full_name: string; email: string; password: string; role: Role; employee_id: string | null; company_ids: string[]; default_company_id: string };
 type RegulationCategory = { category_code: string; category_name_th: string; sort_order: number };
 type RegulationDocument = { id: string; company_id: string; title: string; document_code: string | null; revision: string | null; effective_date: string | null; original_file_name: string | null; storage_path: string | null; source_status: string; created_at: string };
 type RegulationSection = { id: string; document_id: string; company_id: string; category_code: string; section_number: string | null; heading: string; content_text: string; source_page: number | null; sort_order: number };
@@ -67,6 +68,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -87,6 +89,16 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
     setBusy(false);
   }
 
+  async function requestPasswordReset() {
+    if (!supabase) return;
+    if (!email.trim()) { setError("กรุณากรอกอีเมลก่อนขอรีเซ็ตรหัสผ่าน"); return; }
+    setResetBusy(true); setError(""); setNotice("");
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+    setResetBusy(false);
+    if (resetError) setError("ส่งลิงก์รีเซ็ตรหัสผ่านไม่สำเร็จ: " + resetError.message);
+    else setNotice("ส่งลิงก์ยืนยันการรีเซ็ตรหัสผ่านไปยังอีเมลแล้ว กรุณาตรวจสอบกล่องจดหมาย");
+  }
+
   return <main className="login-wrap"><section className="login-card">
     <div className="brand-mark"><ShieldCheck size={30} /></div>
     <p className="eyebrow">STAR LIVE ONLINE</p><h1>Warning System</h1>
@@ -98,6 +110,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
       <label>รหัสผ่าน<div className="password-field"><input type={showPassword ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={8} required value={password} onChange={e => setPassword(e.target.value)} placeholder="อย่างน้อย 8 ตัวอักษร" /><button type="button" className="password-toggle" onClick={() => setShowPassword(v => !v)}>{showPassword ? "ซ่อน" : "แสดง"}</button></div></label>
       {error && <p className="error-text">{error}</p>}{notice && <p className="success-text">{notice}</p>}
       <button className="primary-btn" disabled={busy}>{busy ? "กำลังดำเนินการ..." : mode === "login" ? "เข้าสู่ระบบ" : "สร้างบัญชี"}</button>
+      {mode === "login" && <button type="button" className="text-btn forgot-password" disabled={resetBusy} onClick={() => void requestPasswordReset()}>{resetBusy ? "กำลังส่งลิงก์..." : "ลืมรหัสผ่าน? ส่งลิงก์ยืนยันทางอีเมล"}</button>
     </form>
     <p className="login-foot">การสร้างบัญชีใหม่จะได้รับสิทธิ์เริ่มต้นเป็นผู้ดูข้อมูลเท่านั้น</p>
   </section></main>;
@@ -105,6 +118,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState("");
@@ -128,7 +142,7 @@ function App() {
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => { setSession(nextSession); if (event === "PASSWORD_RECOVERY") setRecoveryMode(true); if (event === "SIGNED_OUT") setRecoveryMode(false); });
     return () => data.subscription.unsubscribe();
   }, []);
 
@@ -208,6 +222,7 @@ function App() {
 
   if (!isSupabaseConfigured) return <main className="setup-wrap"><section className="setup-card"><div className="brand-mark"><ShieldCheck size={30} /></div><h1>Warning System</h1><p>ยังไม่ได้ตั้งค่า Supabase URL และ Publishable Key</p></section></main>;
   if (!session) return <AuthScreen onSignedIn={setSession} />;
+  if (recoveryMode) return <PasswordRecoveryScreen onDone={() => setRecoveryMode(false)} />;
 
   if (loading && !profile) return <main className="setup-wrap"><div className="loading-state"><RefreshCw className="spin" /> กำลังตรวจสอบสิทธิ์และโหลดข้อมูล...</div></main>;
   if (!profile || !profile.is_active) return <main className="setup-wrap"><section className="setup-card">
@@ -247,12 +262,32 @@ function App() {
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
         {section === "regulations" && <RegulationsModule companyId={activeCompanyId} categories={regulationCategories} documents={regulationDocuments} sections={regulationSections} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลระเบียบข้อบังคับแล้ว"); void loadData(); }} />}
-        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={allEmployees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
+        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={allEmployees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onCreateUser={async (input: AdminUserInput) => { if (!supabase || !isAdmin) return; const { data, error } = await supabase.functions.invoke("admin-user-management", { body: { action: "create_user", ...input } }); if (error || data?.error) notify("สร้างบัญชีไม่สำเร็จ: " + (data?.error || error?.message)); else { notify("สร้างบัญชีและกำหนดสิทธิ์สำเร็จ"); void loadData(); } }} onResetPassword={async (userId, newPassword) => { if (!supabase || !isAdmin) return; const { data, error } = await supabase.functions.invoke("admin-user-management", { body: { action: "reset_password", user_id: userId, new_password: newPassword } }); if (error || data?.error) notify("รีเซ็ตรหัสผ่านไม่สำเร็จ: " + (data?.error || error?.message)); else notify("รีเซ็ตรหัสผ่านสำเร็จ"); }} onBootstrap={loadData} />}
       </section>
     </main>
     {toast && <div className="toast-message"><CheckCircle2 size={17} />{toast}</div>}
     <footer className="app-footer no-print"><div>© 2026 Siam HRBP Soft· WARNING SYSTEM PRO (V1.0) &nbsp;| ติดต่อผู้พัฒนา LINE ID: <a href="https://line.me/ti/p/~dj_nodoubt" target="_blank" rel="noopener noreferrer">dj_nodoubt</a></div></footer>
   </div>;
+}
+
+function PasswordRecoveryScreen({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase) return;
+    if (password !== confirmPassword) { setError("รหัสผ่านทั้งสองช่องไม่ตรงกัน"); return; }
+    setBusy(true); setError(""); setNotice("");
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+    if (updateError) setError("เปลี่ยนรหัสผ่านไม่สำเร็จ: " + updateError.message);
+    else { setNotice("เปลี่ยนรหัสผ่านสำเร็จ"); onDone(); }
+  }
+  return <main className="login-wrap"><section className="login-card"><div className="brand-mark"><ShieldCheck size={30} /></div><p className="eyebrow">ACCOUNT SECURITY</p><h1>ตั้งรหัสผ่านใหม่</h1><p className="muted">ยืนยันอีเมลจากลิงก์ที่ได้รับก่อนตั้งรหัสผ่านใหม่</p><form className="login-form" onSubmit={submit}><label>รหัสผ่านใหม่<div className="password-field"><input type={showPassword ? "text" : "password"} minLength={8} required value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" /><button type="button" className="password-toggle" onClick={() => setShowPassword(v => !v)}>{showPassword ? "ซ่อน" : "แสดง"}</button></div></label><label>ยืนยันรหัสผ่าน<input type={showPassword ? "text" : "password"} minLength={8} required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" /></label>{error && <p className="error-text">{error}</p>}{notice && <p className="success-text">{notice}</p>}<button className="primary-btn" disabled={busy}>{busy ? "กำลังบันทึก..." : "บันทึกรหัสผ่านใหม่"}</button></form></section></main>;
 }
 
 function BootstrapAdmin({ onDone }: { onDone: () => Promise<void> }) {
