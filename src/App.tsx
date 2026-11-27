@@ -604,18 +604,156 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
 }
 
 
+
+type RegulationParagraph = { number: string; text: string; kind: "title" | "heading" | "body" };
+const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+async function readDocxXml(file: Blob, target: string): Promise<string | null> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Invalid DOCX archive");
+  const count = view.getUint16(eocd + 10, true);
+  let cursor = view.getUint32(eocd + 16, true);
+  for (let i = 0; i < count; i++) {
+    if (view.getUint32(cursor, true) !== 0x02014b50) break;
+    const method = view.getUint16(cursor + 10, true);
+    const compressedSize = view.getUint32(cursor + 20, true);
+    const nameLength = view.getUint16(cursor + 28, true);
+    const extraLength = view.getUint16(cursor + 30, true);
+    const commentLength = view.getUint16(cursor + 32, true);
+    const localOffset = view.getUint32(cursor + 42, true);
+    const name = new TextDecoder().decode(bytes.slice(cursor + 46, cursor + 46 + nameLength));
+    if (name === target) {
+      const localNameLength = view.getUint16(localOffset + 26, true);
+      const localExtraLength = view.getUint16(localOffset + 28, true);
+      const start = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = bytes.slice(start, start + compressedSize);
+      if (method === 0) return new TextDecoder().decode(compressed);
+      if (method !== 8) throw new Error("Unsupported DOCX compression");
+      const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      return await new Response(stream).text();
+    }
+    cursor += 46 + nameLength + extraLength + commentLength;
+  }
+  return null;
+}
+function parseWordNumbering(documentXml: string, numberingXml: string): RegulationParagraph[] {
+  const doc = new DOMParser().parseFromString(documentXml, "application/xml");
+  const numbering = new DOMParser().parseFromString(numberingXml, "application/xml");
+  const val = (node: Element | null, name: string) => node?.getAttributeNS(WORD_NS, name) || node?.getAttribute("w:" + name) || "";
+  const abstractLevels = new Map<string, Map<number, { format: string; pattern: string; start: number }>>();
+  numbering.getElementsByTagNameNS(WORD_NS, "abstractNum").length;
+  Array.from(numbering.getElementsByTagNameNS(WORD_NS, "abstractNum")).forEach(abstractNum => {
+    const levels = new Map<number, { format: string; pattern: string; start: number }>();
+    Array.from(abstractNum.getElementsByTagNameNS(WORD_NS, "lvl")).forEach(level => {
+      const ilvl = Number(val(level, "ilvl") || 0);
+      const start = Number(val(level.getElementsByTagNameNS(WORD_NS, "start")[0] || null, "val") || 1);
+      const format = val(level.getElementsByTagNameNS(WORD_NS, "numFmt")[0] || null, "val") || "decimal";
+      const pattern = val(level.getElementsByTagNameNS(WORD_NS, "lvlText")[0] || null, "val");
+      levels.set(ilvl, { format, pattern, start });
+    });
+    abstractLevels.set(val(abstractNum, "abstractNumId"), levels);
+  });
+  const nums = new Map<string, Map<number, { format: string; pattern: string; start: number }>>();
+  Array.from(numbering.getElementsByTagNameNS(WORD_NS, "num")).forEach(num => {
+    const id = val(num, "numId");
+    const abstractId = val(num.getElementsByTagNameNS(WORD_NS, "abstractNumId")[0] || null, "val");
+    const levels = new Map(abstractLevels.get(abstractId) || []);
+    Array.from(num.getElementsByTagNameNS(WORD_NS, "lvlOverride")).forEach(override => {
+      const ilvl = Number(val(override, "ilvl") || 0);
+      const startOverride = Number(val(override.getElementsByTagNameNS(WORD_NS, "startOverride")[0] || null, "val"));
+      const existing = levels.get(ilvl);
+      if (existing && startOverride) levels.set(ilvl, { ...existing, start: startOverride });
+    });
+    nums.set(id, levels);
+  });
+  const counters = new Map<string, Map<number, number>>();
+  const paragraphs: RegulationParagraph[] = [];
+  Array.from(doc.getElementsByTagNameNS(WORD_NS, "body")[0]?.getElementsByTagNameNS(WORD_NS, "p") || []).forEach(p => {
+    const text = Array.from(p.getElementsByTagNameNS(WORD_NS, "t")).map(t => t.textContent || "").join("")
+      .replace(/\u00a0/g, " ").trim();
+    if (!text) return;
+    const numPr = p.getElementsByTagNameNS(WORD_NS, "numPr")[0];
+    const numId = val(numPr?.getElementsByTagNameNS(WORD_NS, "numId")[0] || null, "val");
+    const level = Number(val(numPr?.getElementsByTagNameNS(WORD_NS, "ilvl")[0] || null, "val") || 0);
+    let number = "";
+    if (numId && nums.has(numId)) {
+      const defs = nums.get(numId)!;
+      const def = defs.get(level);
+      if (def) {
+        let counts = counters.get(numId);
+        if (!counts) { counts = new Map(); counters.set(numId, counts); }
+        counts.set(level, (counts.get(level) ?? def.start - 1) + 1);
+        for (const key of Array.from(counts.keys())) if (key > level) counts.delete(key);
+        const pattern = def.pattern || "";
+        number = pattern.replace(/%([1-9])/g, (_match, raw: string) => {
+          const index = Number(raw) - 1;
+          const current = counts!.get(index) ?? defs.get(index)?.start ?? 1;
+          const fmt = defs.get(index)?.format || "decimal";
+          if (fmt === "decimalZero") return String(current).padStart(2, "0");
+          if (fmt === "upperRoman" || fmt === "lowerRoman") {
+            const roman = (n: number) => { let x=n, out=""; for (const [v,s] of [[1000,"M"],[900,"CM"],[500,"D"],[400,"CD"],[100,"C"],[90,"XC"],[50,"L"],[40,"XL"],[10,"X"],[9,"IX"],[5,"V"],[4,"IV"],[1,"I"]] as [number,string][]) while(x>=v){out+=s;x-=v;} return fmt==="lowerRoman"?out.toLowerCase():out; };
+            return roman(current);
+          }
+          if (fmt === "upperLetter" || fmt === "lowerLetter") { let n=current,out=""; while(n>0){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26);} return fmt==="lowerLetter"?out.toLowerCase():out; }
+          return String(current);
+        }).replace(/[.]$/, "");
+      }
+    }
+    const style = val(p.getElementsByTagNameNS(WORD_NS, "pStyle")[0] || null, "val").toLowerCase();
+    const kind = /title|heading/.test(style) || /^หมวดที่\s*\d+/.test(text) ? "title" : /^ข้อ\s*\d/.test(text) ? "heading" : "body";
+    paragraphs.push({ number, text, kind });
+  });
+  return paragraphs;
+}
+
 function RegulationsModule({ categories, documents, sections, query, onQueryChange }: {
   categories: RegulationCategory[]; documents: RegulationDocument[]; sections: RegulationSection[];
   query: string; onQueryChange: (value: string) => void;
 }) {
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const filtered = sections.filter(item => {
+  const [wordContent, setWordContent] = useState<Record<string, RegulationParagraph[]>>({});
+  const [wordErrors, setWordErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadOriginalWordLayouts() {
+      if (!supabase) return;
+      const targets = documents.filter(doc => doc.storage_path && !wordContent[doc.id] && !wordErrors[doc.id]);
+      for (const doc of targets) {
+        try {
+          const { data, error } = await supabase.storage.from("company-regulations").download(doc.storage_path!);
+          if (error || !data) throw error || new Error("ไม่พบไฟล์ต้นฉบับ");
+          const [documentXml, numberingXml] = await Promise.all([
+            readDocxXml(data, "word/document.xml"), readDocxXml(data, "word/numbering.xml")
+          ]);
+          if (!documentXml) throw new Error("ไม่พบเนื้อหาใน Word");
+          const parsed = parseWordNumbering(documentXml, numberingXml || "<w:numbering xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'/>");
+          if (!cancelled) setWordContent(current => ({ ...current, [doc.id]: parsed }));
+        } catch (error) {
+          if (!cancelled) setWordErrors(current => ({ ...current, [doc.id]: error instanceof Error ? error.message : "อ่านไฟล์ต้นฉบับไม่สำเร็จ" }));
+        }
+      }
+    }
+    void loadOriginalWordLayouts();
+    return () => { cancelled = true; };
+  }, [documents, wordContent, wordErrors]);
+
+  const enriched = sections.map(item => {
     const doc = documents.find(entry => entry.id === item.document_id);
+    const paragraphs = wordContent[item.document_id];
+    const content = paragraphs?.map(p => p.number + " " + p.text).join("\\n") || item.content_text;
+    return { item, doc, paragraphs, content };
+  });
+  const filtered = enriched.filter(({ item, doc, content }) => {
     const categoryMatch = selectedCategory === "all" || item.category_code === selectedCategory;
-    const searchable = [item.section_number || "", item.heading, item.content_text, doc?.title || "", doc?.document_code || ""].join(" ").toLocaleLowerCase("th-TH");
+    const searchable = [item.section_number || "", item.heading, content, doc?.title || "", doc?.document_code || ""].join(" ").toLocaleLowerCase("th-TH");
     return categoryMatch && (!query.trim() || searchable.includes(query.trim().toLocaleLowerCase("th-TH")));
   });
-  const visibleDocuments = documents.filter(doc => selectedCategory === "all" || filtered.some(item => item.document_id === doc.id));
+  const visibleDocuments = documents.filter(doc => selectedCategory === "all" || filtered.some(row => row.item.document_id === doc.id));
 
   return <>
     <div className="toolbar"><div><strong>คลังระเบียบข้อบังคับมาตรฐานกลาง</strong><span>{documents.length} เอกสาร · {categories.length} หมวด</span></div></div>
@@ -623,11 +761,20 @@ function RegulationsModule({ categories, documents, sections, query, onQueryChan
     <div className="regulation-filters"><label>หมวดข้อบังคับ<select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}><option value="all">ทุกหมวด</option>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label><span className="regulation-result-count">{filtered.length} รายการในหมวดที่เลือก</span></div>
     <div className="regulation-layout">
       <aside className="panel regulation-documents"><div className="panel-head"><div><h3>รายการข้อบังคับ</h3><p>ข้อบังคับมาตรฐานกลาง ใช้ร่วมกันทุกบริษัท</p></div><FileText size={18} /></div>
-        {visibleDocuments.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || "เอกสารข้อบังคับ"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "พร้อมอ่าน"}</span></div></div>)}
+        {visibleDocuments.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || "เอกสารข้อบังคับ"}</small><span className={"source-status " + doc.source_status}>{wordContent[doc.id] ? "แสดงตามต้นฉบับ Word" : wordErrors[doc.id] ? "ใช้ข้อความสำรอง" : "กำลังอ่านต้นฉบับ..."}</span></div></div>)}
         {!visibleDocuments.length && <EmptyState title="ไม่พบเอกสารในหมวดนี้" detail="ลองเลือกหมวดอื่นหรือค้นหาด้วยคำสำคัญ" />}
       </aside>
       <section className="regulation-results"><div className="section-title"><div><h2>ผลการค้นหาและเนื้อหาข้อบังคับ</h2><p>{filtered.length} รายการ {query ? "ตรงกับคำค้น" : "ในหมวดที่เลือก"}</p></div></div>
-        {filtered.map(item => <article className="panel regulation-section" key={item.id}><div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === item.category_code)?.category_name_th || item.category_code}</span><h3>{item.heading}</h3><small>{item.section_number || "—"} · {documents.find(doc => doc.id === item.document_id)?.title || "เอกสารต้นฉบับ"}</small></div></div><div className="regulation-content">{item.content_text}</div></article>)}
+        {filtered.map(({ item, doc, paragraphs }) => <article className="panel regulation-section" key={item.id}>
+          <div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === item.category_code)?.category_name_th || item.category_code}</span><h3>{item.heading}</h3><small>{item.section_number || "—"} · {doc?.title || "เอกสารต้นฉบับ"}</small></div></div>
+          <div className="regulation-content regulation-document-page">
+            {paragraphs ? paragraphs.map((paragraph, index) => <div key={index} className={"regulation-paragraph " + paragraph.kind}>
+              {paragraph.number && <span className="regulation-number">{paragraph.number}.</span>}
+              <span className="regulation-paragraph-text">{paragraph.text}</span>
+            </div>) : <div className="regulation-fallback-text">{item.content_text}</div>}
+            {wordErrors[doc?.id || ""] && <p className="small-note">ไม่สามารถอ่านรูปแบบเลขลำดับจากไฟล์ต้นฉบับได้ในขณะนี้</p>}
+          </div>
+        </article>)}
         {!filtered.length && <EmptyState title="ไม่พบเนื้อหาข้อบังคับ" detail="ลองเปลี่ยนหมวดหรือคำค้นหา" />}
       </section>
     </div>

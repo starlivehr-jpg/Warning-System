@@ -63,3 +63,17 @@
 .danger-action{color:#b42318!important;border-color:#f2c4c0!important;background:#fff8f7!important}
 .danger-action:hover:not(:disabled){background:#feeceb!important;border-color:#e5a19b!important}
 .danger-action:disabled{opacity:.5;cursor:not-allowed}
+
+/* Regulation pages follow the source Word hierarchy instead of rendering as one continuous text block. */
+.regulation-document-page{max-height:none!important;overflow:visible!important;padding:22px 28px!important;background:#fff;color:#25384b;font-size:13px!important;line-height:1.85!important}
+.regulation-paragraph{display:grid;grid-template-columns:minmax(68px,auto) minmax(0,1fr);column-gap:12px;align-items:start;margin:0 0 5px;white-space:pre-wrap;break-inside:avoid}
+.regulation-paragraph.title{display:block;text-align:center;font-weight:600;font-size:15px;line-height:1.65;margin:2px 0 15px;color:#26384c}
+.regulation-paragraph.heading{display:block;font-weight:500;margin:14px 0 5px;color:#26384c}
+.regulation-paragraph.body{padding-left:48px}
+.regulation-number{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;color:#334c64}
+.regulation-paragraph-text{min-width:0;overflow-wrap:anywhere}
+.regulation-fallback-text{white-space:pre-wrap;line-height:1.9}
+.regulation-section{padding:0!important;overflow:hidden}
+.regulation-section-head{padding:16px 22px;border-bottom:1px solid #e8edf2;background:#fbfcfe}
+.regulation-content.regulation-document-page{margin:0;border:0}
+@media(max-width:700px){.regulation-document-page{padding:16px!important;font-size:12px!important}.regulation-paragraph.body{padding-left:8px}.regulation-paragraph{grid-template-columns:minmax(52px,auto) minmax(0,1fr);column-gap:8px}}
