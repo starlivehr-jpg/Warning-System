@@ -209,7 +209,9 @@ function App() {
     setApprovals((a.data || []) as unknown as Approval[]);
     setDepartments((d.data || []) as Department[]);
     setProfiles((users.data || []) as Profile[]);
-    setSignatures((sigs.data || []) as any[]);
+    const signatureArtifacts = await supabase.from("warning_signature_artifacts").select("signature_id,signature_data");
+    const signatureImageById = new Map((signatureArtifacts.data || []).map(item => [item.signature_id, item.signature_data]));
+    setSignatures(((sigs.data || []) as any[]).map(item => ({ ...item, signature_data: signatureImageById.get(item.id) || null })));
     setCompanyAccess((access.data || []) as CompanyAccess[]);
     setRegulationCategories((categories.data || []) as RegulationCategory[]);
     setRegulationDocuments((documents.data || []) as RegulationDocument[]);
