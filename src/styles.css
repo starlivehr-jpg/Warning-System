@@ -63,3 +63,42 @@
 .danger-action{color:#b42318!important;border-color:#f2c4c0!important;background:#fff8f7!important}
 .danger-action:hover:not(:disabled){background:#feeceb!important;border-color:#e5a19b!important}
 .danger-action:disabled{opacity:.5;cursor:not-allowed}
+
+/* Integrated A4 warning-letter composer based on warning_letter.html */
+.warning-letter-form-panel{padding:18px}
+.warning-letter-builder{max-width:980px;margin:0 auto;background:#f8fafc;border:1px solid #dce5ed;border-radius:12px;padding:22px;color:#26384b}
+.letter-company-head{display:flex;align-items:center;gap:13px;padding-bottom:15px;border-bottom:2px solid #26384b}
+.letter-brand-mark{width:48px;height:48px;display:grid;place-items:center;border:1px solid #b9c6d2;border-radius:9px;background:#fff;color:#ef8128;font-size:24px;flex:none}
+.letter-company-head strong,.letter-company-head small{display:block}.letter-company-head strong{font-size:16px;color:#1d3449}.letter-company-head small{font-size:10px;color:#75879a;margin-top:3px;letter-spacing:.7px}
+.letter-title{text-align:center;padding:17px 0 13px}.letter-title h2{font-size:19px;margin:0;color:#1e3449}.letter-title p{font-size:11px;color:#6e7f90;margin:5px 0 0}
+.letter-section{background:#fff;border:1px solid #dfe7ee;border-radius:9px;padding:16px;margin:0 0 13px}
+.letter-section h3{display:flex;align-items:center;gap:8px;font-size:13px;color:#263f57;margin:0 0 13px;padding-bottom:8px;border-bottom:1px solid #edf1f5}
+.letter-section>label{display:block;font-size:11px;font-weight:650;color:#50677d;margin:10px 0}
+.letter-section input:not([type=checkbox]):not([type=radio]),.letter-section select,.letter-section textarea{display:block;width:100%;margin-top:6px;border:1px solid #dce5ed;border-radius:7px;padding:10px 11px;background:#fff;color:#293f54;font:inherit;font-size:12px;outline:0}
+.letter-section textarea{resize:vertical;line-height:1.7}.letter-section input:focus,.letter-section select:focus,.letter-section textarea:focus{border-color:#6d9cbe;box-shadow:0 0 0 3px #6d9cbe1c}
+.employee-auto-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:12px}
+.employee-auto-grid>div{padding:10px;background:#f5f8fb;border:1px solid #e5ebf1;border-radius:7px;min-width:0}
+.employee-auto-grid small,.employee-auto-grid strong{display:block}.employee-auto-grid small{font-size:9px;color:#8292a2}.employee-auto-grid strong{font-size:11px;color:#344c63;margin-top:4px;overflow-wrap:anywhere}
+.letter-grid{display:grid;gap:10px}.letter-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.letter-grid label{font-size:10px;color:#60768a}
+.letter-regulation-search{display:flex;align-items:center;gap:9px;border:1px solid #dce5ed;border-radius:8px;padding:0 11px;background:#fff;color:#7e91a3}
+.letter-regulation-search input{border:0!important;box-shadow:none!important;margin:0!important;height:42px;padding:0!important}
+.letter-helper{font-size:10px;color:#7c8d9e;margin:8px 0}
+.letter-regulation-results{max-height:280px;overflow:auto;border:1px solid #e6edf3;border-radius:8px;padding:4px 10px}
+.letter-regulation-option{display:flex!important;align-items:flex-start;gap:10px;padding:10px 2px;margin:0!important;border-bottom:1px solid #edf1f5;cursor:pointer}
+.letter-regulation-option:last-child{border-bottom:0}.letter-regulation-option>input{margin-top:3px;flex:none}
+.letter-regulation-option>span{display:grid;gap:4px;min-width:0;font-weight:400}
+.letter-regulation-option strong{font-size:11px;color:#304a63}.letter-regulation-option small{font-size:9px;color:#8a9aaa}.letter-regulation-option span span{font-size:10px;line-height:1.6;color:#667b8f}
+.letter-selected-clauses{margin-top:12px;padding:11px;background:#f5f8fb;border-radius:8px;border:1px solid #e3eaf0}
+.letter-selected-clauses>strong{font-size:11px}.letter-selected-clauses>div{white-space:pre-wrap;font-size:10px;line-height:1.7;padding:8px 0;border-bottom:1px solid #e3eaf0}.letter-selected-clauses>div:last-child{border-bottom:0}
+.letter-level-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.letter-level-grid label,.letter-check{display:flex!important;align-items:flex-start;gap:8px;padding:9px;border:1px solid #e7edf2;border-radius:7px;font-size:10px!important;font-weight:500!important;margin:0!important}
+.letter-level-grid input,.letter-check input{margin-top:2px;flex:none}
+.letter-legal-note{margin:13px 0 0;padding:12px;border-left:4px solid #263f57;background:#f3f6f9;font-size:10px;line-height:1.8;color:#536a7f}
+.letter-signature-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+.letter-signature-steps>div{padding:11px;border:1px dashed #b9c7d4;border-radius:7px;background:#fbfcfd}
+.letter-signature-steps b,.letter-signature-steps small{display:block}.letter-signature-steps b{font-size:10px;color:#304a63}.letter-signature-steps small{font-size:9px;color:#8494a3;margin-top:4px}
+.letter-print-hint{font-size:10px;color:#77899a;text-align:center;padding:6px}
+.letter-form-actions{display:flex;align-items:center;gap:9px;justify-content:flex-end;margin-top:14px}
+@media(max-width:760px){.warning-letter-builder{padding:12px}.letter-grid.three,.employee-auto-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.letter-level-grid{grid-template-columns:1fr}}
+@media(max-width:480px){.employee-auto-grid,.letter-grid.three,.letter-signature-steps{grid-template-columns:1fr}.letter-company-head strong{font-size:13px}.letter-title h2{font-size:16px}.letter-section{padding:12px}}
