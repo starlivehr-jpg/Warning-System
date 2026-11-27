@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import sourceTemplate from "./warning_letter_template.html?raw";
-import type { WarningLetterFormValue } from "./WarningLetterFields";
+export type WarningLetterFormValue = { employee_id:string; incident_date:string; incident_time:string; incident_location:string; category:string; incident_description:string; employee_explanation:string; proposed_action:string; regulation_text:string; warning_level:string; approver_id:string; executive_ack_required:boolean };
 
 type EmployeeOption = { id:string; employee_code:string; first_name:string; last_name:string; job_title:string|null; status?:string; departments?:{name:string}|null };
 type RegulationOption = { id:string; section_number:string|null; heading:string; content_text:string; category_code:string; document_id:string };
@@ -19,7 +19,7 @@ const bridgeScript = String.raw`
  const CHANNEL="star-warning-letter-source";
  let currentModel={};
  const send=(type,payload)=>{try{parent.postMessage(Object.assign({channel:CHANNEL,type:type},payload||{}),"*")}catch(e){}};
- const setValue=(el,value)=>{if(!el)return;el.value=value==null?"":String(value);};
+ const setValue=(el,value)=>{if(!el||document.activeElement===el)return;el.value=value==null?"":String(value);};
  const thaiDate=(iso)=>{if(!iso)return "";const p=String(iso).slice(0,10).split("-");return p.length===3?p[2]+"/"+p[1]+"/"+(Number(p[0])+543):iso};
  const renderClauses=(text)=>String(text||"").split("\n---\n").filter(Boolean).map(x=>x.replace(/^\[REF:[^\]]+\]/,"")).join("\n\n");
  function makeEmployeeSelect(model){
@@ -57,8 +57,8 @@ const bridgeScript = String.raw`
   const emp=makeEmployeeSelect(model);if(emp)emp.value=value.employee_id||"";
   const empInputs=document.querySelectorAll("#documentArea .grid.grid-cols-12 input[type=text]");const employee=(model.employees||[]).find(e=>e.id===value.employee_id);
   setValue(empInputs[0],employee?.employee_code||"");setValue(empInputs[1],employee?.job_title||"");setValue(empInputs[2],employee?.departments?.name||"");
-  const incident=document.querySelectorAll("#documentArea section.space-y-3 .grid.grid-cols-12 input");setValue(incident[0],thaiDate(value.incident_date));setValue(incident[1],value.incident_time||"");setValue(incident[2],value.incident_location||"");
-  const boxes=document.querySelectorAll("#documentArea .editable-box");if(boxes[0])boxes[0].textContent=value.incident_description||"";if(boxes[1])boxes[1].textContent=renderClauses(value.regulation_text||"");
+  const incident=document.querySelectorAll("#documentArea section.space-y-3 .grid.grid-cols-12 input");setValue(incident[0],thaiDate(value.incident_date));setValue(incident[1],value.incident_time||"");setValue(incident[2],value.incident_location||"");incident.forEach((el,i)=>{if(!el.dataset.bridgeBound){el.dataset.bridgeBound="1";el.addEventListener("input",()=>send("change",{field:["incident_date","incident_time","incident_location"][i],value:el.value}))}});
+  const boxes=document.querySelectorAll("#documentArea .editable-box");if(boxes[0]&&document.activeElement!==boxes[0])boxes[0].textContent=value.incident_description||"";if(boxes[1]&&document.activeElement!==boxes[1])boxes[1].textContent=renderClauses(value.regulation_text||"");
   setValue(document.getElementById("systemCategoryInput"),value.category||"");setValue(document.getElementById("employeeExplanationInput"),value.employee_explanation||"");setValue(document.getElementById("proposedActionInput"),value.proposed_action||"");
   const levels=document.querySelectorAll("#documentArea section.space-y-3 .bg-slate-50 input[type=checkbox]");const keys=["verbal","written_1","written_2","final_written"];levels.forEach((el,i)=>{el.checked=keys[i]===value.warning_level;el.onchange=()=>{levels.forEach((x,j)=>x.checked=i===j);send("change",{field:"warning_level",value:keys[i]})}});
   const signatures=model.signatures||[];const map={employee_ack:1,issuer:2,hr_manager_ack:3,executive_ack:4};[1,2,3,4].forEach(i=>{const step=Object.keys(map).find(k=>map[k]===i);const sig=signatures.find(s=>s.signature_step===step);const img=document.getElementById("sigImg"+i);const hint=document.getElementById("sigHint"+i);if(img){img.src=sig?.signature_data||"";img.classList.toggle("hidden",!sig?.signature_data)}if(hint)hint.style.display=sig?.signature_data?"none":""});
