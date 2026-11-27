@@ -329,3 +329,80 @@
     order: 1;
   }
 }
+
+
+/* Correct desktop composition: the A4 iframe keeps its real paper width;
+   the outer composer expands to the available application workspace. */
+@media (min-width: 1200px) {
+  .warning-letter-form-panel {
+    width: 100% !important;
+    max-width: none !important;
+    box-sizing: border-box;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding: 14px !important;
+  }
+  .warning-letter-form-panel > .form-head,
+  .warning-letter-form-panel > .letter-form-actions {
+    width: 100%;
+    max-width: none;
+  }
+  .warning-letter-form-panel .source-letter-workspace {
+    display: grid !important;
+    grid-template-columns: 210mm minmax(380px, 1fr) !important;
+    align-items: start;
+    justify-content: stretch !important;
+    gap: 20px;
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible;
+  }
+  .warning-letter-form-panel .source-template-iframe {
+    display: block;
+    grid-column: 1;
+    grid-row: 1;
+    width: 210mm !important;
+    min-width: 210mm !important;
+    max-width: none !important;
+    height: 1320px;
+    flex: none;
+  }
+  .warning-letter-form-panel .source-workflow-controls {
+    grid-column: 2;
+    grid-row: 1;
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+    max-height: calc(100vh - 190px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: sticky;
+    top: 12px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+  .warning-letter-form-panel .source-workflow-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .warning-letter-form-panel .source-regulation-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 1199px) {
+  .warning-letter-form-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+  }
+  .warning-letter-form-panel .source-letter-workspace {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .warning-letter-form-panel .source-template-iframe {
+    width: 210mm;
+    min-width: 210mm;
+    max-width: none;
+  }
+}
