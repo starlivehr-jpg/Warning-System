@@ -393,4 +393,203 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
   </>;
 }
 
+
+type ZipEntry = { name: string; bytes: Uint8Array };
+
+async function unzipEntries(bytes: Uint8Array): Promise<ZipEntry[]> {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const view = new DataView(buffer);
+  const minOffset = Math.max(0, buffer.byteLength - 65557);
+  let eocd = -1;
+  for (let i = buffer.byteLength - 22; i >= minOffset; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("ไม่พบโครงสร้าง ZIP ที่ถูกต้อง");
+  const entryCount = view.getUint16(eocd + 10, true);
+  let cursor = view.getUint32(eocd + 16, true);
+  const decoder = new TextDecoder("utf-8");
+  const output: ZipEntry[] = [];
+  for (let i = 0; i < entryCount; i++) {
+    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("ข้อมูล ZIP ไม่สมบูรณ์");
+    const method = view.getUint16(cursor + 10, true);
+    const compressedSize = view.getUint32(cursor + 20, true);
+    const nameLength = view.getUint16(cursor + 28, true);
+    const extraLength = view.getUint16(cursor + 30, true);
+    const commentLength = view.getUint16(cursor + 32, true);
+    const localOffset = view.getUint32(cursor + 42, true);
+    const name = decoder.decode(new Uint8Array(buffer, cursor + 46, nameLength));
+    cursor += 46 + nameLength + extraLength + commentLength;
+    if (!name.toLowerCase().endsWith(".docx") || name.startsWith("__MACOSX/") || name.split("/").pop()?.startsWith("~$")) continue;
+    if (view.getUint32(localOffset, true) !== 0x04034b50) continue;
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = new Uint8Array(buffer, dataOffset, compressedSize);
+    let data: Uint8Array;
+    if (method === 0) data = compressed.slice();
+    else if (method === 8) {
+      const stream = new Blob([compressed.slice().buffer as ArrayBuffer]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      data = new Uint8Array(await new Response(stream).arrayBuffer());
+    } else continue;
+    output.push({ name, bytes: data });
+  }
+  return output;
+}
+
+async function extractDocxText(bytes: Uint8Array): Promise<string> {
+  const entries = await unzipEntries(bytes);
+  const documentXml = entries.find(entry => entry.name.toLowerCase() === "word/document.xml");
+  if (!documentXml) throw new Error("ไม่พบเนื้อหา Word document.xml");
+  const xml = new DOMParser().parseFromString(new TextDecoder("utf-8").decode(documentXml.bytes), "application/xml");
+  if (xml.querySelector("parsererror")) throw new Error("อ่าน XML ในไฟล์ Word ไม่สำเร็จ");
+  return Array.from(xml.getElementsByTagName("w:p"))
+    .map(paragraph => Array.from(paragraph.getElementsByTagName("w:t")).map(node => node.textContent || "").join(""))
+    .join("\n");
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
+  return Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, "0")).join("");
+}
+
+function inferRegulationCategory(fileName: string, content: string, fallback: string): string {
+  const text = (fileName + " " + content.slice(0, 2500)).toLowerCase();
+  const rules: [string, string[]][] = [
+    ["discipline", ["วินัยและโทษทางวินัย", "วินัย", "discipline"]],
+    ["working_time", ["วันทำงาน", "เวลาทำงาน", "เวลาพัก", "working hours"]],
+    ["holidays", ["วันหยุด", "holiday"]],
+    ["wages", ["ค่าจ้าง", "เงินเดือน", "ค่าตอบแทน", "wage", "salary"]],
+    ["overtime", ["ล่วงเวลา", "ทำงานในวันหยุด", "overtime"]],
+    ["leave", ["การลา", "ลาป่วย", "ลากิจ", "พักร้อน", "leave"]],
+    ["welfare_safety", ["สวัสดิการ", "รักษาพยาบาล", "ความปลอดภัย", "welfare", "safety"]],
+    ["development", ["พัฒนาบุคลากร", "ฝึกอบรม", "development", "training"]],
+    ["grievances", ["ร้องทุกข์", "ข้อร้องเรียน", "grievance"]],
+    ["termination", ["เลิกจ้าง", "termination"]],
+    ["severance", ["ค่าชดเชย", "severance"]],
+    ["employment", ["การจ้างงาน", "สัญญาจ้าง", "employment"]],
+    ["acknowledgment", ["รับทราบ", "ความเข้าใจข้อบังคับ", "acknowledgment"]],
+    ["general", ["ข้อบังคับทั่วไป", "บททั่วไป", "general"]],
+  ];
+  return rules.find(([, terms]) => terms.some(term => text.includes(term)))?.[0] || fallback;
+}
+
+function RegulationsModule({ companyId, categories, documents, sections, canManage, query, userId, onSaved }: {
+  companyId: string; categories: RegulationCategory[]; documents: RegulationDocument[];
+  sections: RegulationSection[]; canManage: boolean; query: string; userId: string; onSaved: () => void;
+}) {
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [fallbackCategory, setFallbackCategory] = useState("general");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const filtered = sections.filter(section => {
+    const doc = documents.find(item => item.id === section.document_id);
+    const categoryMatch = selectedCategory === "all" || section.category_code === selectedCategory;
+    const searchable = [section.section_number || "", section.heading, section.content_text, doc?.title || "", doc?.document_code || ""].join(" ").toLowerCase();
+    return categoryMatch && (!query.trim() || searchable.includes(query.trim().toLowerCase()));
+  });
+
+  async function openOriginal(doc: RegulationDocument) {
+    if (!supabase || !doc.storage_path) return;
+    const { data, error: e } = await supabase.storage.from("company-regulations").createSignedUrl(doc.storage_path, 120);
+    if (e) window.alert("เปิดเอกสารต้นฉบับไม่สำเร็จ: " + e.message);
+    else window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function importWordArchive(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase || !uploadFile || !companyId) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      if (uploadFile.size > 25 * 1024 * 1024) throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 25 MB");
+      const inputBytes = new Uint8Array(await uploadFile.arrayBuffer());
+      const candidates = uploadFile.name.toLowerCase().endsWith(".zip")
+        ? await unzipEntries(inputBytes)
+        : uploadFile.name.toLowerCase().endsWith(".docx") ? [{ name: uploadFile.name, bytes: inputBytes }] : [];
+      if (!candidates.length) throw new Error("รองรับไฟล์ ZIP ที่บรรจุ Word .docx หรือไฟล์ .docx โดยตรง");
+      let imported = 0;
+      const issues: string[] = [];
+      for (const candidate of candidates) {
+        const originalName = candidate.name.split("/").pop() || candidate.name;
+        let content = "";
+        try { content = await extractDocxText(candidate.bytes); }
+        catch (extractError) { issues.push(originalName + ": " + (extractError instanceof Error ? extractError.message : "อ่านเนื้อหาไม่สำเร็จ")); continue; }
+        if (!content.trim()) { issues.push(originalName + ": ไม่พบข้อความในเอกสาร"); continue; }
+        const title = originalName.replace(/\.docx$/i, "");
+        const category = inferRegulationCategory(originalName, content, fallbackCategory);
+        const codeMatch = content.match(/(?:Document\s*No\.?|รหัสเอกสาร)\s*[:：]\s*([^\r\n]+)/i);
+        const revisionMatch = content.match(/Revision\s*[:：]\s*([^\r\n]+)/i);
+        const digest = await sha256Hex(candidate.bytes);
+        const { data: doc, error: insertError } = await supabase.from("regulation_documents").insert({
+          company_id: companyId, title, document_code: codeMatch?.[1]?.trim() || null,
+          revision: revisionMatch?.[1]?.trim() || null, original_file_name: originalName,
+          file_sha256: digest, source_status: "uploaded", uploaded_by: userId,
+        }).select("id").single();
+        if (insertError || !doc) { issues.push(originalName + ": " + (insertError?.message || "สร้างรายการเอกสารไม่สำเร็จ")); continue; }
+        const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = doc.id + "/" + safeName;
+        const blob = new Blob([candidate.bytes.slice().buffer as ArrayBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        const { error: uploadError } = await supabase.storage.from("company-regulations").upload(path, blob, { contentType: blob.type, upsert: false });
+        if (uploadError) {
+          await supabase.from("regulation_documents").delete().eq("id", doc.id);
+          issues.push(originalName + ": อัปโหลดไฟล์ต้นฉบับไม่สำเร็จ - " + uploadError.message);
+          continue;
+        }
+        const { error: pathError } = await supabase.from("regulation_documents").update({ storage_path: path }).eq("id", doc.id);
+        if (pathError) {
+          await supabase.storage.from("company-regulations").remove([path]);
+          await supabase.from("regulation_documents").delete().eq("id", doc.id);
+          issues.push(originalName + ": บันทึกตำแหน่งไฟล์ไม่สำเร็จ - " + pathError.message);
+          continue;
+        }
+        const { error: sectionError } = await supabase.from("regulation_sections").insert({
+          document_id: doc.id, company_id: companyId, category_code: category,
+          section_number: "เนื้อหาเต็ม", heading: title, content_text: content,
+          sort_order: categories.find(item => item.category_code === category)?.sort_order || 99,
+        });
+        if (sectionError) {
+          await supabase.from("regulation_documents").update({ source_status: "needs_review" }).eq("id", doc.id);
+          issues.push(originalName + ": เก็บไฟล์แล้ว แต่สร้างดัชนีค้นหาไม่สำเร็จ - " + sectionError.message);
+          continue;
+        }
+        await supabase.from("regulation_documents").update({ source_status: "indexed" }).eq("id", doc.id);
+        imported++;
+      }
+      setNotice("นำเข้าและจัดทำดัชนีข้อความจาก Word สำเร็จ " + imported + " ไฟล์" + (issues.length ? " · มีรายการที่ต้องตรวจสอบ " + issues.length + " ไฟล์" : ""));
+      if (issues.length) setError(issues.join("\n"));
+      setUploadFile(null); setShowUpload(false); onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "นำเข้าเอกสารไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
+    <div className="toolbar"><div><strong>คลังระเบียบข้อบังคับการทำงาน</strong><span>{documents.length} เอกสาร · {sections.length} รายการเนื้อหาที่ค้นหาได้</span></div>{canManage && <button className="primary-small" onClick={() => setShowUpload(v => !v)}><Plus size={16} /> นำเข้า Word / ZIP</button>}</div>
+    <article className="panel regulation-intro"><div><h3>ค้นหาข้อบังคับตามหมวดและเนื้อหา</h3><p>เก็บไฟล์ต้นฉบับไว้ในพื้นที่ส่วนตัวของบริษัท และดึงข้อความจาก Word โดยตรงเพื่อค้นหา โดยไม่สรุปหรือเขียนเนื้อหากฎหมายใหม่</p></div></article>
+    {showUpload && <form className="form-panel" onSubmit={importWordArchive}><div className="form-head"><strong>นำเข้าเอกสาร Word</strong><button type="button" className="close-btn" onClick={() => setShowUpload(false)}><X size={17} /></button></div>
+      <div className="form-grid"><label>หมวดสำรองกรณีระบบจัดหมวดจากเนื้อหาไม่ได้<select value={fallbackCategory} onChange={e => setFallbackCategory(e.target.value)}>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label>
+      <label className="span-2">ไฟล์ Word (.docx) หรือ ZIP ที่บรรจุ Word หลายไฟล์<input type="file" accept=".zip,.docx,application/zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e => setUploadFile(e.target.files?.[0] || null)} required /></label></div>
+      <p className="small-note">รองรับ ZIP ขนาดไม่เกิน 25 MB ระบบจะแยกไฟล์ .docx ภายใน ดึงข้อความจากแต่ละเอกสาร จัดหมวดจากชื่อไฟล์/หัวข้อ และบันทึก SHA-256 ของไฟล์ต้นฉบับ</p>
+      {error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !uploadFile}>{busy ? "กำลังนำเข้าเอกสาร..." : "นำเข้าและจัดทำดัชนีค้นหา"}</button>
+    </form>}
+    {notice && <p className="success-text">{notice}</p>}
+    <div className="regulation-filters"><label>หมวดข้อบังคับ<select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}><option value="all">ทุกหมวด</option>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label></div>
+    <div className="regulation-layout">
+      <aside className="panel regulation-documents"><div className="panel-head"><div><h3>เอกสารต้นฉบับ</h3><p>แยกตามบริษัทที่กำลังเลือก</p></div><FileText size={18} /></div>
+        {documents.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || doc.original_file_name || "ไฟล์ Word"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "อัปโหลดแล้ว"}</span></div>{doc.storage_path && <button className="table-action" onClick={() => void openOriginal(doc)}>เปิดต้นฉบับ</button>}</div>)}
+        {!documents.length && <EmptyState title="ยังไม่มีเอกสารต้นฉบับ" detail="นำเข้า ZIP หรือ Word ของบริษัทนี้เพื่อเริ่มต้น" />}
+      </aside>
+      <section className="regulation-results"><div className="section-title"><div><h2>ผลการค้นหาและเนื้อหาข้อบังคับ</h2><p>{filtered.length} รายการ {query ? "ตรงกับคำค้น" : "ในหมวดที่เลือก"}</p></div></div>
+        {filtered.map(section => <article className="panel regulation-section" key={section.id}><div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === section.category_code)?.category_name_th || section.category_code}</span><h3>{section.heading}</h3><small>{section.section_number || "—"} · {documents.find(doc => doc.id === section.document_id)?.title || "เอกสารต้นฉบับ"}</small></div></div><div className="regulation-content">{section.content_text}</div></article>)}
+        {!filtered.length && <EmptyState title="ไม่พบเนื้อหาข้อบังคับ" detail={documents.length ? "ลองเปลี่ยนหมวดหรือคำค้น หรือเพิ่มข้อความจากเอกสารต้นฉบับ" : "ยังไม่มีการนำเข้าเอกสารของบริษัทนี้"} />}
+      </section>
+    </div>
+  </>;
+}
+
 export default App;
