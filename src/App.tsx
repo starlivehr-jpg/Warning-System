@@ -473,13 +473,20 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
     const { data: attachmentRows, error: attachmentQueryError } = await supabase.from("warning_attachments").select("storage_path").eq("warning_id", warning.id);
     if (attachmentQueryError) { setBusy(false); window.alert("ตรวจสอบไฟล์แนบไม่สำเร็จ: " + attachmentQueryError.message); return; }
     const paths = (attachmentRows || []).map(a => a.storage_path).filter(Boolean);
+    // Delete the database record first. Never remove evidence files if the
+    // audited System Admin deletion is rejected by the database.
+    const { error: deleteError } = await supabase.rpc("admin_delete_warning", { p_warning_id: warning.id });
+    if (deleteError) { setBusy(false); window.alert("ลบหนังสือเตือนไม่สำเร็จ: " + deleteError.message); return; }
     if (paths.length) {
       const { error: storageError } = await supabase.storage.from("warning-evidence").remove(paths);
-      if (storageError) { setBusy(false); window.alert("ลบไฟล์แนบไม่สำเร็จ จึงยกเลิกการลบหนังสือเตือน: " + storageError.message); return; }
+      if (storageError) {
+        setBusy(false);
+        window.alert("ลบรายการหนังสือเตือนแล้ว แต่มีไฟล์แนบในพื้นที่จัดเก็บที่ต้องตรวจสอบ: " + storageError.message);
+        onSaved();
+        return;
+      }
     }
-    const { error: deleteError } = await supabase.rpc("admin_delete_warning", { p_warning_id: warning.id });
     setBusy(false);
-    if (deleteError) { window.alert("ลบหนังสือเตือนไม่สำเร็จ: " + deleteError.message + "\nกรุณาตรวจสอบไฟล์แนบใน Storage เนื่องจากไฟล์อาจถูกลบไปแล้ว"); return; }
     if (previewWarning?.id === warning.id) setPreviewWarning(null);
     window.alert("ลบหนังสือเตือน " + warning.case_number + " เรียบร้อยแล้ว");
     onSaved();
