@@ -126,7 +126,7 @@ function App() {
   const [regulationCategories, setRegulationCategories] = useState<RegulationCategory[]>([]);
   const [regulationDocuments, setRegulationDocuments] = useState<RegulationDocument[]>([]);
   const [regulationSections, setRegulationSections] = useState<RegulationSection[]>([]);
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>(() => { const route = window.location.hash.replace(/^#\/?/, "").split("?")[0] as Section; return navItems.some(item => item.id === route) ? route : "overview"; });
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
@@ -138,6 +138,13 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    const syncRoute = () => { const route = window.location.hash.replace(/^#\/?/, "").split("?")[0] as Section; if (navItems.some(item => item.id === route)) setSection(route); };
+    window.addEventListener("popstate", syncRoute); window.addEventListener("hashchange", syncRoute);
+    if (!window.location.hash) window.history.replaceState({ section: "overview" }, "", "#overview");
+    return () => { window.removeEventListener("popstate", syncRoute); window.removeEventListener("hashchange", syncRoute); };
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -214,6 +221,7 @@ function App() {
 
   useEffect(() => { if (session) void loadData(); else { setProfile(null); setCompanies([]); setActiveCompanyId(""); setCompanyAccess([]); setEmployees([]); setAllEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
 
+  const navigate = (next: Section) => { setSection(next); if (window.location.hash !== "#" + next) window.history.pushState({ section: next }, "", "#" + next); };
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3500); };
   async function signOut() { await supabase?.auth.signOut(); setSession(null); setProfile(null); }
   const active = navItems.find(item => item.id === section);
@@ -248,7 +256,7 @@ function App() {
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark small"><ShieldCheck size={22} /></div><div><strong>STAR LIVE</strong><span>WARNING SYSTEM</span></div></div>
       <div className="workspace-label">WORKSPACE</div>
-      <nav>{navItems.map(item => <button key={item.id} className={section === item.id ? "nav-item active" : "nav-item"} onClick={() => setSection(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === "approvals" && approvals.filter(a => a.decision === "pending").length > 0 && <span className="pending-count">{approvals.filter(a => a.decision === "pending").length}</span>}</button>)}</nav>
+      <nav>{navItems.map(item => <button key={item.id} className={section === item.id ? "nav-item active" : "nav-item"} onClick={() => navigate(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === "approvals" && approvals.filter(a => a.decision === "pending").length > 0 && <span className="pending-count">{approvals.filter(a => a.decision === "pending").length}</span>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="security-note"><ShieldCheck size={17} /><span>ระบบรักษาความปลอดภัย</span></div><button className="nav-item" onClick={signOut}><LogOut size={18} /><span>ออกจากระบบ</span></button></div>
     </aside>
     <main className="main-area">
@@ -256,7 +264,7 @@ function App() {
       <section className="page-content">
         <div className="page-heading"><div><p className="eyebrow">HUMAN RESOURCES / WARNING MANAGEMENT</p><h1>{active?.label}</h1><p className="muted">จัดการข้อมูลและติดตามกระบวนการด้านวินัยพนักงานอย่างเป็นระบบ</p></div><div className="date-chip">{companies.find(company => company.id === activeCompanyId)?.company_name || "บริษัทที่เลือก"}</div></div>
         {error && <div className="inline-error">{error}</div>}
-        {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={setSection} />}
+        {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={navigate} />}
         {section === "employees" && <EmployeesModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
         {section === "warnings" && <WarningsModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
