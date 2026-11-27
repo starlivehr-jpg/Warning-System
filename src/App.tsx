@@ -353,6 +353,8 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
   const hasSignature = (warningId: string) => signatures.some(s => s.warning_id === warningId);
   const canEditDraft = (warning: WarningCase) => warning.status === "draft" && !hasSignature(warning.id) &&
     (profile.role === "system_admin" || profile.role === "hr_officer" || warning.created_by === userId);
+  const canCreateDraftRevision = (warning: WarningCase) => warning.status === "draft" && hasSignature(warning.id) &&
+    (profile.role === "system_admin" || profile.role === "hr_officer" || warning.created_by === userId);
   const filtered = warnings.filter(w => [w.case_number, w.category, w.incident_description, w.employees?.first_name || "", w.employees?.last_name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
 
   function startEdit(warning: WarningCase) {
@@ -361,6 +363,22 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
     setForm({ employee_id: warning.employee_id, incident_date: warning.incident_date, category: warning.category, incident_description: warning.incident_description, warning_level: warning.warning_level, approver_id: "", executive_ack_required: !!warning.executive_ack_required });
     setEvidence(null); setError(""); setShowForm(true);
   }
+  async function createEditableCopy(warning: WarningCase) {
+    if (!supabase || !canCreateDraftRevision(warning)) return;
+    const confirmed = window.confirm("ฉบับร่างนี้มีลายเซ็นอิเล็กทรอนิกส์แล้ว จึงไม่สามารถแก้ไขเอกสารเดิมได้\n\nต้องการสร้างฉบับร่างใหม่จากข้อมูลฉบับนี้เพื่อแก้ไข โดยเก็บเอกสารและลายเซ็นเดิมไว้หรือไม่?");
+    if (!confirmed) return;
+    const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
+    const { error: copyError } = await supabase.from("warning_cases").insert({
+      case_number: caseNumber, employee_id: warning.employee_id, company_id: warning.company_id,
+      incident_date: warning.incident_date, category: warning.category,
+      incident_description: warning.incident_description, warning_level: warning.warning_level,
+      executive_ack_required: !!warning.executive_ack_required, status: "draft", created_by: userId,
+    });
+    if (copyError) { window.alert("สร้างฉบับร่างใหม่ไม่สำเร็จ: " + copyError.message); return; }
+    window.alert("สร้างฉบับร่างใหม่สำหรับแก้ไขแล้ว\nเลขที่เอกสาร: " + caseNumber + "\nเอกสารเดิมและลายเซ็นเดิมยังคงอยู่โดยไม่เปลี่ยนแปลง");
+    onSaved();
+  }
+
   function closeForm() { setShowForm(false); setEditingId(""); setEvidence(null); setError(""); setForm(emptyForm()); }
 
   async function save(e: FormEvent) {
@@ -374,14 +392,14 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
     if (editingId) {
       const target = warnings.find(w => w.id === editingId);
       if (!target || !canEditDraft(target)) { setError("ไม่มีสิทธิ์แก้ไข หรือหนังสือเตือนไม่อยู่ในสถานะฉบับร่างแล้ว"); setBusy(false); return; }
-      const { error: updateError } = await supabase.from("warning_cases").update({
+      const { data: updatedWarning, error: updateError } = await supabase.from("warning_cases").update({
         employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
         category: form.category, incident_description: form.incident_description,
         warning_level: form.warning_level,
         executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false,
         status: form.approver_id ? "pending_approval" : "draft", updated_by: userId, updated_at: new Date().toISOString(),
-      }).eq("id", editingId).eq("status", "draft");
-      if (updateError) { setError(updateError.message); setBusy(false); return; }
+      }).eq("id", editingId).eq("status", "draft").select("id").maybeSingle();
+      if (updateError || !updatedWarning) { setError(updateError?.message || "ไม่พบฉบับร่างหรือบัญชีนี้ไม่มีสิทธิ์แก้ไข"); setBusy(false); return; }
     } else {
       const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
       const { data, error: insertError } = await supabase.from("warning_cases").insert({
@@ -433,7 +451,7 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
       <label className="span-2">แนบหลักฐานเพิ่มเติม (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e => setEvidence(e.target.files?.[0] || null)} /></label>
       {(profile.role === "hr_officer" || profile.role === "system_admin") && <label className="span-2"><input type="checkbox" checked={form.executive_ack_required} onChange={e => setForm({ ...form, executive_ack_required: e.target.checked })} /> กำหนดให้ผู้บริหารลงนามรับทราบหนังสือฉบับนี้</label>}
     </div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !employees.length}>{busy ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "บันทึกข้อมูล"}</button>{!employees.length && <p className="small-note">กรุณาเพิ่มข้อมูลพนักงานก่อนสร้างหนังสือเตือน</p>}</form>}
-    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td>{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{canEditDraft(w) && <button className="table-action" onClick={() => startEdit(w)}>แก้ไขฉบับร่าง</button>}{(profile.role === "supervisor" || profile.role === "hr_officer") && !signatures.some(s => s.warning_id === w.id && s.signature_step === "issuer") && <button className="table-action" onClick={() => void sign(w.id,"issuer")}>ลงนามผู้ออก</button>}{profile.role === "hr_manager" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "hr_manager_ack") && <button className="table-action" onClick={() => void sign(w.id,"hr_manager_ack")}>ลงนาม HR Manager</button>}{profile.role === "executive" && w.executive_ack_required && !signatures.some(s => s.warning_id === w.id && s.signature_step === "executive_ack") && <button className="table-action" onClick={() => void sign(w.id,"executive_ack")}>ลงนามผู้บริหาร</button>}{profile.role === "employee" && profile.employee_id === w.employee_id && w.status === "issued" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "employee_ack") && <button className="table-action" onClick={() => void sign(w.id,"employee_ack")}>ลงนามรับทราบ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
+    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td>{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{canEditDraft(w) && <button className="table-action" onClick={() => startEdit(w)}>แก้ไขฉบับร่าง</button>}{canCreateDraftRevision(w) && <button className="table-action" onClick={() => void createEditableCopy(w)}>สร้างฉบับร่างเพื่อแก้ไข</button>}{w.status === "draft" && hasSignature(w.id) && <small className="cell-sub">มีลายเซ็นแล้ว · เอกสารเดิมไม่สามารถแก้ไขได้</small>}{w.status === "approved" && (profile.role === "supervisor" || profile.role === "hr_officer") && !signatures.some(s => s.warning_id === w.id && s.signature_step === "issuer") && <button className="table-action" onClick={() => void sign(w.id,"issuer")}>ลงนามผู้ออก</button>}{profile.role === "hr_manager" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "hr_manager_ack") && <button className="table-action" onClick={() => void sign(w.id,"hr_manager_ack")}>ลงนาม HR Manager</button>}{profile.role === "executive" && w.executive_ack_required && !signatures.some(s => s.warning_id === w.id && s.signature_step === "executive_ack") && <button className="table-action" onClick={() => void sign(w.id,"executive_ack")}>ลงนามผู้บริหาร</button>}{profile.role === "employee" && profile.employee_id === w.employee_id && w.status === "issued" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "employee_ack") && <button className="table-action" onClick={() => void sign(w.id,"employee_ack")}>ลงนามรับทราบ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
   </>;
 }
 
@@ -542,20 +560,13 @@ function RegulationsModule({ categories, documents, sections, query, onQueryChan
   });
   const visibleDocuments = documents.filter(doc => selectedCategory === "all" || filtered.some(item => item.document_id === doc.id));
 
-  async function openOriginal(doc: RegulationDocument) {
-    if (!supabase || !doc.storage_path) return;
-    const { data, error: openError } = await supabase.storage.from("company-regulations").createSignedUrl(doc.storage_path, 120);
-    if (openError) window.alert("เปิดเอกสารต้นฉบับไม่สำเร็จ: " + openError.message);
-    else window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  }
-
   return <>
     <div className="toolbar"><div><strong>คลังระเบียบข้อบังคับมาตรฐานกลาง</strong><span>{documents.length} เอกสาร · {categories.length} หมวด</span></div></div>
     <div className="regulation-search"><Search size={17} /><input value={query} onChange={e => onQueryChange(e.target.value)} placeholder="ค้นหาข้อบังคับ เช่น วันลา เวลาทำงาน ค่าชดเชย..." aria-label="ค้นหาข้อบังคับ" /><button type="button" className="table-action" onClick={() => onQueryChange("")} disabled={!query}>ล้าง</button></div>
     <div className="regulation-filters"><label>หมวดข้อบังคับ<select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}><option value="all">ทุกหมวด</option>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label><span className="regulation-result-count">{filtered.length} รายการในหมวดที่เลือก</span></div>
     <div className="regulation-layout">
-      <aside className="panel regulation-documents"><div className="panel-head"><div><h3>เอกสารต้นฉบับ</h3><p>ข้อบังคับมาตรฐานกลาง ใช้ร่วมกันทุกบริษัท</p></div><FileText size={18} /></div>
-        {visibleDocuments.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || doc.original_file_name || "เอกสารข้อบังคับ"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "พร้อมอ่าน"}</span></div>{doc.storage_path && <button className="table-action" onClick={() => void openOriginal(doc)}>เปิดต้นฉบับ</button>}</div>)}
+      <aside className="panel regulation-documents"><div className="panel-head"><div><h3>รายการข้อบังคับ</h3><p>ข้อบังคับมาตรฐานกลาง ใช้ร่วมกันทุกบริษัท</p></div><FileText size={18} /></div>
+        {visibleDocuments.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || "เอกสารข้อบังคับ"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "พร้อมอ่าน"}</span></div></div>)}
         {!visibleDocuments.length && <EmptyState title="ไม่พบเอกสารในหมวดนี้" detail="ลองเลือกหมวดอื่นหรือค้นหาด้วยคำสำคัญ" />}
       </aside>
       <section className="regulation-results"><div className="section-title"><div><h2>ผลการค้นหาและเนื้อหาข้อบังคับ</h2><p>{filtered.length} รายการ {query ? "ตรงกับคำค้น" : "ในหมวดที่เลือก"}</p></div></div>
