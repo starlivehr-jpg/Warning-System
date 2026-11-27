@@ -191,7 +191,7 @@ function App() {
     }
     const [e, w, a, d, users, sigs, access, categories, documents, sections] = await Promise.all([
       supabase.from("employees").select("id,employee_code,first_name,last_name,company_id,department_id,job_title,status,employment_start_date,departments(name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
-      supabase.from("warning_cases").select("id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,created_by,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("warning_cases").select("id,case_number,employee_id,company_id,incident_date,incident_time,incident_location,category,incident_description,employee_explanation,proposed_action,warning_level,status,executive_ack_required,created_at,created_by,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
       supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases!inner(id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").eq("warning_cases.company_id", selectedCompany).order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name,company_id").eq("company_id", selectedCompany).eq("is_active", true).order("name"),
       supabase.from("profiles").select("id,full_name,role,is_active,employee_id,default_company_id").order("full_name"),
@@ -368,8 +368,23 @@ function SignaturePadDialog({ signerName, stepLabel, onCancel, onConfirm, busy }
 
 function WarningDocumentPreview({ warning, signatures, onClose }: { warning: WarningCase; signatures: any[]; onClose: () => void }) {
   const employee=warning.employees?[warning.employees.first_name,warning.employees.last_name].filter(Boolean).join(" "):"—";
-  const steps=[{key:"issuer",label:"ผู้ออกหนังสือเตือน"},{key:"hr_manager_ack",label:"ผู้จัดการฝ่ายทรัพยากรบุคคล"},{key:"executive_ack",label:"ผู้บริหารรับทราบ"},{key:"employee_ack",label:"พนักงานรับทราบ"}];
-  return <div className="modal-backdrop document-backdrop"><section className="document-dialog"><div className="document-toolbar no-print"><strong>ตัวอย่างหนังสือเตือน · {warning.case_number}</strong><div><button className="secondary-small" onClick={()=>window.print()}>พิมพ์ / บันทึก PDF</button><button className="close-btn" onClick={onClose}><X size={17}/></button></div></div><article className="warning-print-document"><header><h1>หนังสือเตือนพนักงาน</h1><p>WARNING LETTER</p></header><div className="document-meta"><span>เลขที่เอกสาร: {warning.case_number}</span><span>วันที่เกิดเหตุ: {new Date(warning.incident_date+"T00:00:00").toLocaleDateString("th-TH")}</span></div><p>เรื่อง: {levelLabels[warning.warning_level]||"หนังสือเตือน"}</p><p>เรียน: {employee}</p><p>ประเภทเหตุการณ์: {warning.category}</p><h3>รายละเอียดเหตุการณ์</h3><p className="document-paragraph">{warning.incident_description}</p><h3>การลงนามรับทราบและยืนยันเอกสาร</h3><div className="document-signature-grid">{steps.map(step=>{const sig=signatures.find(s=>s.warning_id===warning.id&&s.signature_step===step.key);return <div className="document-signature" key={step.key}><div className="document-signature-image">{sig?.signature_data?<img src={sig.signature_data} alt={"ลายเซ็น "+sig.signer_name}/>:<span>ยังไม่มีลายเซ็น</span>}</div><strong>{sig?.signer_name||"—"}</strong><span>{step.label}</span><small>{sig?.signed_at?new Date(sig.signed_at).toLocaleString("th-TH"):"รอลงนาม"}</small></div>;})}</div><footer>เอกสารอิเล็กทรอนิกส์ · ลายเซ็นผูกกับค่า SHA-256 ของเอกสาร ณ เวลาที่ลงนาม</footer></article></section></div>;
+  const marker="\n\n[ข้อบังคับที่เกี่ยวข้อง]\n";
+  const parts=warning.incident_description.split(marker);
+  const facts=parts[0], clauses=parts[1]||"";
+  const steps=[{key:"issuer",label:"ผู้ออกหนังสือเตือน"},{key:"hr_manager_ack",label:"ผู้จัดการฝ่ายทรัพยากรบุคคล"},{key:"executive_ack",label:"ผู้บริหารรับทราบ"},{key:"employee_ack",label:"พนักงานรับทราบ"}].filter(step=>step.key!=="executive_ack"||warning.executive_ack_required);
+  return <div className="modal-backdrop document-backdrop"><section className="document-dialog"><div className="document-toolbar no-print"><strong>หนังสือตักเตือน · {warning.case_number}</strong><div><button className="secondary-small" onClick={()=>window.print()}>พิมพ์ / บันทึก PDF</button><button className="close-btn" onClick={onClose}><X size={17}/></button></div></div>
+    <article className="warning-print-document"><header><h1>หนังสือตักเตือนพนักงาน</h1><p>WARNING LETTER</p></header>
+      <div className="document-meta"><span>เลขที่เอกสาร: {warning.case_number}</span><span>วันที่ออกหนังสือ: {new Date(warning.created_at).toLocaleDateString("th-TH")}</span></div>
+      <p><b>เรียน:</b> {employee} · <b>รหัสพนักงาน:</b> {warning.employees?.employee_code||"—"}</p>
+      <p><b>เรื่อง:</b> {levelLabels[warning.warning_level]||"หนังสือเตือน"} · <b>ประเภทเหตุการณ์:</b> {warning.category}</p>
+      <p><b>วันเกิดเหตุ:</b> {new Date(warning.incident_date+"T00:00:00").toLocaleDateString("th-TH")} · <b>เวลา:</b> {warning.incident_time||"—"} · <b>สถานที่:</b> {warning.incident_location||"—"}</p>
+      <h3>1. รายละเอียดการกระทำความผิด</h3><p className="document-paragraph">{facts}</p>
+      {warning.employee_explanation&&<><h3>2. คำชี้แจงของพนักงาน</h3><p className="document-paragraph">{warning.employee_explanation}</p></>}
+      {clauses&&<><h3>3. ข้อบังคับเกี่ยวกับการทำงานที่ฝ่าฝืน</h3><p className="document-paragraph">{clauses.replace(/\[REF:[^\]]+\]/g,"")}</p></>}
+      {warning.proposed_action&&<><h3>4. แนวทางดำเนินการ / คำสั่งให้ปรับปรุงแก้ไข</h3><p className="document-paragraph">{warning.proposed_action}</p></>}
+      <h3>การลงนามตามลำดับของระบบ</h3><div className="document-signature-grid">{steps.map(step=>{const sig=signatures.find(s=>s.warning_id===warning.id&&s.signature_step===step.key);return <div className="document-signature" key={step.key}><div className="document-signature-image">{sig?.signature_data?<img src={sig.signature_data} alt={"ลายเซ็น "+sig.signer_name}/>:<span>รอลงนาม</span>}</div><strong>{sig?.signer_name||"—"}</strong><span>{step.label}</span><small>{sig?.signed_at?new Date(sig.signed_at).toLocaleString("th-TH"):"รอลงนาม"}</small></div>;})}</div>
+      <footer>เอกสารอิเล็กทรอนิกส์ · ลายเซ็นผูกกับค่า SHA-256 ของเอกสาร ณ เวลาที่ลงนาม</footer>
+    </article></section></div>;
 }
 function WarningsModule({ companyId, companies, onCompanyChange, warnings, employees, profiles, canManage, profile, signatures, query, userId, regulations, regulationDocuments, companyName, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; regulations: RegulationSection[]; regulationDocuments: RegulationDocument[]; companyName: string; onSaved: () => void }) {
   const [signatureTarget, setSignatureTarget] = useState<{ warningId: string; step: string } | null>(null);
@@ -406,8 +421,8 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
     const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
     const { error: copyError } = await supabase.from("warning_cases").insert({
       case_number: caseNumber, employee_id: warning.employee_id, company_id: warning.company_id,
-      incident_date: warning.incident_date, category: warning.category,
-      incident_description: warning.incident_description, warning_level: warning.warning_level,
+      incident_date: warning.incident_date, incident_time: warning.incident_time, incident_location: warning.incident_location, category: warning.category,
+      incident_description: warning.incident_description, employee_explanation: warning.employee_explanation, proposed_action: warning.proposed_action, warning_level: warning.warning_level,
       executive_ack_required: !!warning.executive_ack_required, status: "draft", created_by: userId,
     });
     if (copyError) { window.alert("สร้างฉบับร่างใหม่ไม่สำเร็จ: " + copyError.message); return; }
