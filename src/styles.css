@@ -59,3 +59,7 @@
   @page{size:A4;margin:0}
 }
 @media(max-width:650px){.signature-dialog{padding:15px}.signature-actions{align-items:stretch}.signature-actions>*{flex:1}.document-dialog{padding:7px}.warning-print-document{padding:22px 16px}.document-meta{flex-direction:column}.document-signature-grid{gap:18px 10px}}
+
+.danger-action{color:#b42318!important;border-color:#f2c4c0!important;background:#fff8f7!important}
+.danger-action:hover:not(:disabled){background:#feeceb!important;border-color:#e5a19b!important}
+.danger-action:disabled{opacity:.5;cursor:not-allowed}
