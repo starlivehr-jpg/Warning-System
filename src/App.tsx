@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ClipboardList,
@@ -126,7 +126,7 @@ function App() {
   const [regulationCategories, setRegulationCategories] = useState<RegulationCategory[]>([]);
   const [regulationDocuments, setRegulationDocuments] = useState<RegulationDocument[]>([]);
   const [regulationSections, setRegulationSections] = useState<RegulationSection[]>([]);
-  const [section, setSection] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>(() => { const route = window.location.hash.replace(/^#\/?/, "").split("?")[0] as Section; return navItems.some(item => item.id === route) ? route : "overview"; });
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
@@ -138,6 +138,13 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    const syncRoute = () => { const route = window.location.hash.replace(/^#\/?/, "").split("?")[0] as Section; if (navItems.some(item => item.id === route)) setSection(route); };
+    window.addEventListener("popstate", syncRoute); window.addEventListener("hashchange", syncRoute);
+    if (!window.location.hash) window.history.replaceState({ section: "overview" }, "", "#overview");
+    return () => { window.removeEventListener("popstate", syncRoute); window.removeEventListener("hashchange", syncRoute); };
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -202,7 +209,9 @@ function App() {
     setApprovals((a.data || []) as unknown as Approval[]);
     setDepartments((d.data || []) as Department[]);
     setProfiles((users.data || []) as Profile[]);
-    setSignatures((sigs.data || []) as any[]);
+    const signatureArtifacts = await supabase.from("warning_signature_artifacts").select("signature_id,signature_data");
+    const signatureImageById = new Map((signatureArtifacts.data || []).map(item => [item.signature_id, item.signature_data]));
+    setSignatures(((sigs.data || []) as any[]).map(item => ({ ...item, signature_data: signatureImageById.get(item.id) || null })));
     setCompanyAccess((access.data || []) as CompanyAccess[]);
     setRegulationCategories((categories.data || []) as RegulationCategory[]);
     setRegulationDocuments((documents.data || []) as RegulationDocument[]);
@@ -214,6 +223,7 @@ function App() {
 
   useEffect(() => { if (session) void loadData(); else { setProfile(null); setCompanies([]); setActiveCompanyId(""); setCompanyAccess([]); setEmployees([]); setAllEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
 
+  const navigate = (next: Section) => { setSection(next); if (window.location.hash !== "#" + next) window.history.pushState({ section: next }, "", "#" + next); };
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3500); };
   async function signOut() { await supabase?.auth.signOut(); setSession(null); setProfile(null); }
   const active = navItems.find(item => item.id === section);
@@ -248,7 +258,7 @@ function App() {
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark small"><ShieldCheck size={22} /></div><div><strong>STAR LIVE</strong><span>WARNING SYSTEM</span></div></div>
       <div className="workspace-label">WORKSPACE</div>
-      <nav>{navItems.map(item => <button key={item.id} className={section === item.id ? "nav-item active" : "nav-item"} onClick={() => setSection(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === "approvals" && approvals.filter(a => a.decision === "pending").length > 0 && <span className="pending-count">{approvals.filter(a => a.decision === "pending").length}</span>}</button>)}</nav>
+      <nav>{navItems.map(item => <button key={item.id} className={section === item.id ? "nav-item active" : "nav-item"} onClick={() => navigate(item.id)}><item.icon size={18} /><span>{item.label}</span>{item.id === "approvals" && approvals.filter(a => a.decision === "pending").length > 0 && <span className="pending-count">{approvals.filter(a => a.decision === "pending").length}</span>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="security-note"><ShieldCheck size={17} /><span>ระบบรักษาความปลอดภัย</span></div><button className="nav-item" onClick={signOut}><LogOut size={18} /><span>ออกจากระบบ</span></button></div>
     </aside>
     <main className="main-area">
@@ -256,7 +266,7 @@ function App() {
       <section className="page-content">
         <div className="page-heading"><div><p className="eyebrow">HUMAN RESOURCES / WARNING MANAGEMENT</p><h1>{active?.label}</h1><p className="muted">จัดการข้อมูลและติดตามกระบวนการด้านวินัยพนักงานอย่างเป็นระบบ</p></div><div className="date-chip">{companies.find(company => company.id === activeCompanyId)?.company_name || "บริษัทที่เลือก"}</div></div>
         {error && <div className="inline-error">{error}</div>}
-        {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={setSection} />}
+        {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={navigate} />}
         {section === "employees" && <EmployeesModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
         {section === "warnings" && <WarningsModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
@@ -322,7 +332,8 @@ function EmptyState({ title, detail }: { title: string; detail: string }) { retu
 function StatusPill({ status }: { status: string }) { return <span className={"status-pill " + status}>{statusLabels[status] || status}</span>; }
 
 function EmployeesModule({ companyId, companies, onCompanyChange, employees, departments, canManage, query, userId, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; employees: Employee[]; departments: Department[]; canManage: boolean; query: string; userId: string; onSaved: () => void }) {
-  const [showForm, setShowForm] = useState(false); const [showDepartment, setShowDepartment] = useState(false); const [departmentName, setDepartmentName] = useState(""); const [departmentError, setDepartmentError] = useState(""); const [editingId, setEditingId] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const [showForm, setShowForm] = useState(false);
+ const [showDepartment, setShowDepartment] = useState(false); const [departmentName, setDepartmentName] = useState(""); const [departmentError, setDepartmentError] = useState(""); const [editingId, setEditingId] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [form, setForm] = useState({ employee_code: "", first_name: "", last_name: "", department_id: "", job_title: "", employment_start_date: "", status: "active" });
   const filtered = employees.filter(e => [e.employee_code, e.first_name, e.last_name, e.job_title || "", e.departments?.name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
   async function save(e: FormEvent) {
@@ -341,7 +352,27 @@ function EmployeesModule({ companyId, companies, onCompanyChange, employees, dep
   </>;
 }
 
+function SignaturePadDialog({ signerName, stepLabel, onCancel, onConfirm, busy }: { signerName: string; stepLabel: string; onCancel: () => void; onConfirm: (signatureData: string) => void; busy: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const drawing = useRef(false);
+  const [hasInk, setHasInk] = useState(false);
+  useEffect(() => { const canvas=canvasRef.current; if(!canvas)return; const ctx=canvas.getContext("2d"); if(!ctx)return; ctx.fillStyle="#fff"; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.strokeStyle="#142f4b"; ctx.lineWidth=3; ctx.lineCap="round"; ctx.lineJoin="round"; }, []);
+  function point(event: React.PointerEvent<HTMLCanvasElement>) { const canvas=canvasRef.current!; const rect=canvas.getBoundingClientRect(); return {x:(event.clientX-rect.left)*canvas.width/rect.width,y:(event.clientY-rect.top)*canvas.height/rect.height}; }
+  function start(event: React.PointerEvent<HTMLCanvasElement>) { const canvas=canvasRef.current!; canvas.setPointerCapture(event.pointerId); const p=point(event); const ctx=canvas.getContext("2d")!; ctx.beginPath(); ctx.moveTo(p.x,p.y); drawing.current=true; setHasInk(true); }
+  function move(event: React.PointerEvent<HTMLCanvasElement>) { if(!drawing.current)return; const p=point(event); const ctx=canvasRef.current!.getContext("2d")!; ctx.lineTo(p.x,p.y); ctx.stroke(); }
+  function clear() { const canvas=canvasRef.current!; const ctx=canvas.getContext("2d")!; ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle="#fff"; ctx.fillRect(0,0,canvas.width,canvas.height); setHasInk(false); }
+  return <div className="modal-backdrop signature-backdrop"><section className="signature-dialog" role="dialog" aria-modal="true"><div className="form-head"><div><strong>ลงนามอิเล็กทรอนิกส์</strong><p className="small-note">{stepLabel} · {signerName}</p></div><button type="button" className="close-btn" onClick={onCancel}><X size={17}/></button></div><p className="small-note">เซ็นชื่อในกรอบด้านล่างด้วยเมาส์หรือหน้าจอสัมผัส</p><canvas ref={canvasRef} className="signature-canvas" width={900} height={260} onPointerDown={start} onPointerMove={move} onPointerUp={()=>{drawing.current=false;}} onPointerCancel={()=>{drawing.current=false;}} aria-label="พื้นที่วาดลายเซ็น"/><div className="signature-actions"><button type="button" className="secondary-small" onClick={clear}>ล้างลายเซ็น</button><span className="small-note">{signerName}</span><button type="button" className="primary-small" disabled={!hasInk||busy} onClick={()=>{const data=canvasRef.current?.toDataURL("image/png");if(data)onConfirm(data);}}>{busy?"กำลังบันทึก...":"ยืนยันและลงนาม"}</button></div></section></div>;
+}
+
+function WarningDocumentPreview({ warning, signatures, onClose }: { warning: WarningCase; signatures: any[]; onClose: () => void }) {
+  const employee=warning.employees?[warning.employees.first_name,warning.employees.last_name].filter(Boolean).join(" "):"—";
+  const steps=[{key:"issuer",label:"ผู้ออกหนังสือเตือน"},{key:"hr_manager_ack",label:"ผู้จัดการฝ่ายทรัพยากรบุคคล"},{key:"executive_ack",label:"ผู้บริหารรับทราบ"},{key:"employee_ack",label:"พนักงานรับทราบ"}];
+  return <div className="modal-backdrop document-backdrop"><section className="document-dialog"><div className="document-toolbar no-print"><strong>ตัวอย่างหนังสือเตือน · {warning.case_number}</strong><div><button className="secondary-small" onClick={()=>window.print()}>พิมพ์ / บันทึก PDF</button><button className="close-btn" onClick={onClose}><X size={17}/></button></div></div><article className="warning-print-document"><header><h1>หนังสือเตือนพนักงาน</h1><p>WARNING LETTER</p></header><div className="document-meta"><span>เลขที่เอกสาร: {warning.case_number}</span><span>วันที่เกิดเหตุ: {new Date(warning.incident_date+"T00:00:00").toLocaleDateString("th-TH")}</span></div><p>เรื่อง: {levelLabels[warning.warning_level]||"หนังสือเตือน"}</p><p>เรียน: {employee}</p><p>ประเภทเหตุการณ์: {warning.category}</p><h3>รายละเอียดเหตุการณ์</h3><p className="document-paragraph">{warning.incident_description}</p><h3>การลงนามรับทราบและยืนยันเอกสาร</h3><div className="document-signature-grid">{steps.map(step=>{const sig=signatures.find(s=>s.warning_id===warning.id&&s.signature_step===step.key);return <div className="document-signature" key={step.key}><div className="document-signature-image">{sig?.signature_data?<img src={sig.signature_data} alt={"ลายเซ็น "+sig.signer_name}/>:<span>ยังไม่มีลายเซ็น</span>}</div><strong>{sig?.signer_name||"—"}</strong><span>{step.label}</span><small>{sig?.signed_at?new Date(sig.signed_at).toLocaleString("th-TH"):"รอลงนาม"}</small></div>;})}</div><footer>เอกสารอิเล็กทรอนิกส์ · ลายเซ็นผูกกับค่า SHA-256 ของเอกสาร ณ เวลาที่ลงนาม</footer></article></section></div>;
+}
 function WarningsModule({ companyId, companies, onCompanyChange, warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
+  const [signatureTarget, setSignatureTarget] = useState<{ warningId: string; step: string } | null>(null);
+  const [signatureBusy, setSignatureBusy] = useState(false);
+  const [previewWarning, setPreviewWarning] = useState<WarningCase | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -431,12 +462,12 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
     setBusy(false); closeForm(); onSaved();
   }
 
-  async function sign(warningId: string, step: string) {
+  async function sign(warningId: string, step: string, signatureData: string) {
     if (!supabase) return;
-    const consent = window.confirm("ยืนยันการลงนามอิเล็กทรอนิกส์ในเอกสารฉบับนี้หรือไม่? การลงนามจะถูกบันทึกพร้อมเวลาและหลักฐานตรวจสอบย้อนหลัง");
-    if (!consent) return;
-    const { error: signError } = await supabase.rpc("sign_warning", { p_warning_id: warningId, p_signature_step: step, p_signer_name: profile.full_name, p_consent_text: "ข้าพเจ้ายืนยันตัวตนและยินยอมลงนามอิเล็กทรอนิกส์ในหนังสือเตือนฉบับนี้" });
-    if (signError) window.alert("ลงนามไม่สำเร็จ: " + signError.message); else onSaved();
+    setSignatureBusy(true);
+    const { error: signError } = await supabase.rpc("sign_warning", { p_warning_id: warningId, p_signature_step: step, p_signer_name: profile.full_name, p_consent_text: "ข้าพเจ้ายืนยันตัวตนและยินยอมลงนามอิเล็กทรอนิกส์ในหนังสือเตือนฉบับนี้", p_signature_data: signatureData });
+    setSignatureBusy(false);
+    if (signError) window.alert("ลงนามไม่สำเร็จ: " + signError.message); else { setSignatureTarget(null); onSaved(); }
   }
 
   return <>
@@ -452,7 +483,9 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
       <label className="span-2">แนบหลักฐานเพิ่มเติม (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e => setEvidence(e.target.files?.[0] || null)} /></label>
       {(profile.role === "hr_officer" || profile.role === "system_admin") && <label className="span-2"><input type="checkbox" checked={form.executive_ack_required} onChange={e => setForm({ ...form, executive_ack_required: e.target.checked })} /> กำหนดให้ผู้บริหารลงนามรับทราบหนังสือฉบับนี้</label>}
     </div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !employees.length}>{busy ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "บันทึกข้อมูล"}</button>{!employees.length && <p className="small-note">กรุณาเพิ่มข้อมูลพนักงานก่อนสร้างหนังสือเตือน</p>}</form>}
-    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td>{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{canEditDraft(w) && <button className="table-action" onClick={() => startEdit(w)}>แก้ไขฉบับร่าง</button>}{canCreateDraftRevision(w) && <button className="table-action" onClick={() => void createEditableCopy(w)}>สร้างฉบับร่างเพื่อแก้ไข</button>}{w.status === "draft" && hasSignature(w.id) && <small className="cell-sub">มีลายเซ็นแล้ว · เอกสารเดิมไม่สามารถแก้ไขได้</small>}{w.status === "approved" && (profile.role === "supervisor" || profile.role === "hr_officer") && !signatures.some(s => s.warning_id === w.id && s.signature_step === "issuer") && <button className="table-action" onClick={() => void sign(w.id,"issuer")}>ลงนามผู้ออก</button>}{profile.role === "hr_manager" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "hr_manager_ack") && <button className="table-action" onClick={() => void sign(w.id,"hr_manager_ack")}>ลงนาม HR Manager</button>}{profile.role === "executive" && w.executive_ack_required && !signatures.some(s => s.warning_id === w.id && s.signature_step === "executive_ack") && <button className="table-action" onClick={() => void sign(w.id,"executive_ack")}>ลงนามผู้บริหาร</button>}{profile.role === "employee" && profile.employee_id === w.employee_id && w.status === "issued" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "employee_ack") && <button className="table-action" onClick={() => void sign(w.id,"employee_ack")}>ลงนามรับทราบ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
+    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td><button className="table-action" onClick={() => setPreviewWarning(w)}>เปิดดูเอกสาร</button>{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{canEditDraft(w) && <button className="table-action" onClick={() => startEdit(w)}>แก้ไขฉบับร่าง</button>}{canCreateDraftRevision(w) && <button className="table-action" onClick={() => void createEditableCopy(w)}>สร้างฉบับร่างเพื่อแก้ไข</button>}{w.status === "draft" && hasSignature(w.id) && <small className="cell-sub">มีลายเซ็นแล้ว · เอกสารเดิมไม่สามารถแก้ไขได้</small>}{w.status === "approved" && (profile.role === "supervisor" || profile.role === "hr_officer") && !signatures.some(s => s.warning_id === w.id && s.signature_step === "issuer") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"issuer"})}>ลงนามผู้ออก</button>}{profile.role === "hr_manager" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "hr_manager_ack") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"hr_manager_ack"})}>ลงนาม HR Manager</button>}{profile.role === "executive" && w.executive_ack_required && !signatures.some(s => s.warning_id === w.id && s.signature_step === "executive_ack") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"executive_ack"})}>ลงนามผู้บริหาร</button>}{profile.role === "employee" && profile.employee_id === w.employee_id && w.status === "issued" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "employee_ack") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"employee_ack"})}>ลงนามรับทราบ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
+    {signatureTarget && <SignaturePadDialog signerName={profile.full_name} stepLabel={({issuer:"ผู้ออกหนังสือเตือน",hr_manager_ack:"ผู้จัดการฝ่ายทรัพยากรบุคคล",executive_ack:"ผู้บริหารรับทราบ",employee_ack:"พนักงานรับทราบ"} as Record<string,string>)[signatureTarget.step]} busy={signatureBusy} onCancel={()=>setSignatureTarget(null)} onConfirm={data=>void sign(signatureTarget.warningId,signatureTarget.step,data)}/>}
+    {previewWarning && <WarningDocumentPreview warning={previewWarning} signatures={signatures} onClose={()=>setPreviewWarning(null)}/>}
   </>;
 }
 
