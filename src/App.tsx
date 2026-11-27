@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ClipboardList,
   FileCheck2, FileText, LayoutDashboard, LogOut, Plus, Search, Settings, ShieldCheck,
-  Users, X, RefreshCw, LockKeyhole, Download, BookOpen,
+  Users, X, RefreshCw, LockKeyhole, Download, BookOpen, Eye, EyeOff,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
@@ -26,7 +26,7 @@ type Employee = {
 type WarningCase = {
   id: string; case_number: string; employee_id: string; company_id: string; incident_date: string;
   category: string; incident_description: string; warning_level: string; status: string; executive_ack_required?: boolean;
-  created_at: string; employees?: { employee_code: string; first_name: string; last_name: string } | null;
+  created_at: string; created_by: string; employees?: { employee_code: string; first_name: string; last_name: string } | null;
   warning_attachments?: { id: string; storage_path: string; original_file_name: string }[];
 };
 type Approval = {
@@ -182,15 +182,15 @@ function App() {
     }
     const [e, w, a, d, users, sigs, access, categories, documents, sections] = await Promise.all([
       supabase.from("employees").select("id,employee_code,first_name,last_name,company_id,department_id,job_title,status,employment_start_date,departments(name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
-      supabase.from("warning_cases").select("id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("warning_cases").select("id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,created_by,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
       supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases!inner(id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").eq("warning_cases.company_id", selectedCompany).order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name,company_id").eq("company_id", selectedCompany).eq("is_active", true).order("name"),
       supabase.from("profiles").select("id,full_name,role,is_active,employee_id,default_company_id").order("full_name"),
       supabase.from("warning_signatures").select("id,warning_id,company_id,signer_id,signature_step,signer_name,document_digest,signed_at").eq("company_id", selectedCompany).order("signed_at"),
       supabase.from("user_company_access").select("profile_id,company_id"),
       supabase.from("regulation_categories").select("category_code,category_name_th,sort_order").order("sort_order"),
-      supabase.from("regulation_documents").select("id,company_id,title,document_code,revision,effective_date,original_file_name,storage_path,source_status,created_at").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
-      supabase.from("regulation_sections").select("id,document_id,company_id,category_code,section_number,heading,content_text,source_page,sort_order").eq("company_id", selectedCompany).order("sort_order"),
+      supabase.from("regulation_documents").select("id,company_id,title,document_code,revision,effective_date,original_file_name,storage_path,source_status,created_at,is_shared_standard").order("created_at", { ascending: false }),
+      supabase.from("regulation_sections").select("id,document_id,company_id,category_code,section_number,heading,content_text,source_page,sort_order").order("sort_order"),
     ]);
     setEmployees((e.data || []) as unknown as Employee[]);
     if (p.data?.role === "system_admin") {
@@ -261,8 +261,8 @@ function App() {
         {section === "warnings" && <WarningsModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
-        {section === "regulations" && <RegulationsModule companyId={activeCompanyId} categories={regulationCategories} documents={regulationDocuments} sections={regulationSections} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลระเบียบข้อบังคับแล้ว"); void loadData(); }} />}
-        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={allEmployees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onCreateUser={async (input: AdminUserInput) => { if (!supabase || !isAdmin) throw new Error("System Admin permission required"); const { data, error } = await supabase.functions.invoke("admin-user-management", { body: { action: "create_user", ...input } }); if (error || data?.error) { const message = data?.error || error?.message || "สร้างบัญชีไม่สำเร็จ"; notify("สร้างบัญชีไม่สำเร็จ: " + message); throw new Error(message); } notify("สร้างบัญชีและกำหนดสิทธิ์สำเร็จ"); void loadData(); }} onResetPassword={async (userId, newPassword) => { if (!supabase || !isAdmin) return; const { data, error } = await supabase.functions.invoke("admin-user-management", { body: { action: "reset_password", user_id: userId, new_password: newPassword } }); if (error || data?.error) notify("รีเซ็ตรหัสผ่านไม่สำเร็จ: " + (data?.error || error?.message)); else notify("รีเซ็ตรหัสผ่านสำเร็จ"); }} onBootstrap={loadData} />}
+        {section === "regulations" && <RegulationsModule categories={regulationCategories} documents={regulationDocuments} sections={regulationSections} query={search} onQueryChange={setSearch} />}
+        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={allEmployees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onCreateUser={async (input: AdminUserInput) => { if (!supabase || !isAdmin) throw new Error("System Admin permission required"); const { data, error } = await supabase.functions.invoke("admin-user-management", { body: { action: "create_user", ...input } }); if (error || data?.error) { let message = data?.error || error?.message || "สร้างบัญชีไม่สำเร็จ"; const context = (error as { context?: Response } | null)?.context; if (context) { const body = await context.clone().json().catch(() => null) as { error?: string; message?: string } | null; message = body?.error || body?.message || message; } notify("สร้างบัญชีไม่สำเร็จ: " + message); throw new Error(message); } notify("สร้างบัญชีและกำหนดสิทธิ์สำเร็จ"); void loadData(); }} onResetPassword={async (userId, newPassword) => { if (!supabase || !isAdmin) return; const { data, error } = await supabase.functions.invoke("admin-user-management", { body: { action: "reset_password", user_id: userId, new_password: newPassword } }); if (error || data?.error) notify("รีเซ็ตรหัสผ่านไม่สำเร็จ: " + (data?.error || error?.message)); else notify("รีเซ็ตรหัสผ่านสำเร็จ"); }} onBootstrap={loadData} />}
       </section>
     </main>
     {toast && <div className="toast-message"><CheckCircle2 size={17} />{toast}</div>}
@@ -342,54 +342,98 @@ function EmployeesModule({ companyId, companies, onCompanyChange, employees, dep
 }
 
 function WarningsModule({ companyId, companies, onCompanyChange, warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
-  const [showForm, setShowForm] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const [evidence, setEvidence] = useState<File | null>(null);
-  const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
+  const emptyForm = () => ({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
+  const [form, setForm] = useState(emptyForm);
   const canCreate = canManage || profile.role === "supervisor";
+  const hasSignature = (warningId: string) => signatures.some(s => s.warning_id === warningId);
+  const canEditDraft = (warning: WarningCase) => warning.status === "draft" && !hasSignature(warning.id) &&
+    (profile.role === "system_admin" || profile.role === "hr_officer" || warning.created_by === userId);
   const filtered = warnings.filter(w => [w.case_number, w.category, w.incident_description, w.employees?.first_name || "", w.employees?.last_name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
+
+  function startEdit(warning: WarningCase) {
+    if (!canEditDraft(warning)) return;
+    setEditingId(warning.id);
+    setForm({ employee_id: warning.employee_id, incident_date: warning.incident_date, category: warning.category, incident_description: warning.incident_description, warning_level: warning.warning_level, approver_id: "", executive_ack_required: !!warning.executive_ack_required });
+    setEvidence(null); setError(""); setShowForm(true);
+  }
+  function closeForm() { setShowForm(false); setEditingId(""); setEvidence(null); setError(""); setForm(emptyForm()); }
+
   async function save(e: FormEvent) {
-    e.preventDefault(); if (!supabase) return; setBusy(true); setError("");
-    if (evidence && (evidence.size > 10 * 1024 * 1024 || !["application/pdf","image/png","image/jpeg"].includes(evidence.type))) { setError("ไฟล์หลักฐานต้องเป็น PDF/JPG/PNG และมีขนาดไม่เกิน 10 MB"); setBusy(false); return; }
-    const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
-    const { data, error: err } = await supabase.from("warning_cases").insert({
-      case_number: caseNumber, employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
-      category: form.category, incident_description: form.incident_description,
-      warning_level: form.warning_level, executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false, status: form.approver_id ? "pending_approval" : "draft", created_by: userId,
-    }).select("id").single();
-    if (err) { setError(err.message); setBusy(false); return; }
-    if (evidence) {
+    e.preventDefault();
+    if (!supabase) return;
+    setBusy(true); setError("");
+    if (evidence && (evidence.size > 10 * 1024 * 1024 || !["application/pdf","image/png","image/jpeg"].includes(evidence.type))) {
+      setError("ไฟล์หลักฐานต้องเป็น PDF/JPG/PNG และมีขนาดไม่เกิน 10 MB"); setBusy(false); return;
+    }
+    let warningId = editingId;
+    if (editingId) {
+      const target = warnings.find(w => w.id === editingId);
+      if (!target || !canEditDraft(target)) { setError("ไม่มีสิทธิ์แก้ไข หรือหนังสือเตือนไม่อยู่ในสถานะฉบับร่างแล้ว"); setBusy(false); return; }
+      const { error: updateError } = await supabase.from("warning_cases").update({
+        employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
+        category: form.category, incident_description: form.incident_description,
+        warning_level: form.warning_level,
+        executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false,
+        status: form.approver_id ? "pending_approval" : "draft", updated_by: userId, updated_at: new Date().toISOString(),
+      }).eq("id", editingId).eq("status", "draft");
+      if (updateError) { setError(updateError.message); setBusy(false); return; }
+    } else {
+      const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
+      const { data, error: insertError } = await supabase.from("warning_cases").insert({
+        case_number: caseNumber, employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
+        category: form.category, incident_description: form.incident_description,
+        warning_level: form.warning_level, executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false,
+        status: form.approver_id ? "pending_approval" : "draft", created_by: userId,
+      }).select("id").single();
+      if (insertError || !data) { setError(insertError?.message || "สร้างหนังสือเตือนไม่สำเร็จ"); setBusy(false); return; }
+      warningId = data.id;
+    }
+    if (evidence && warningId) {
       const safeName = evidence.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const storagePath = data.id + "/" + Date.now() + "-" + safeName;
+      const storagePath = warningId + "/" + Date.now() + "-" + safeName;
       const { error: uploadError } = await supabase.storage.from("warning-evidence").upload(storagePath, evidence, { contentType: evidence.type, upsert: false });
       if (uploadError) { setError("บันทึกหนังสือเตือนแล้ว แต่แนบไฟล์ไม่สำเร็จ: " + uploadError.message); setBusy(false); return; }
-      const { error: metaError } = await supabase.from("warning_attachments").insert({ warning_id: data.id, storage_path: storagePath, original_file_name: evidence.name, mime_type: evidence.type, file_size_bytes: evidence.size, uploaded_by: userId });
+      const { error: metaError } = await supabase.from("warning_attachments").insert({ warning_id: warningId, storage_path: storagePath, original_file_name: evidence.name, mime_type: evidence.type, file_size_bytes: evidence.size, uploaded_by: userId });
       if (metaError) { await supabase.storage.from("warning-evidence").remove([storagePath]); setError("อัปโหลดไฟล์แล้วแต่บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + metaError.message); setBusy(false); return; }
     }
-    if (form.approver_id) {
-      const { error: approvalError } = await supabase.from("warning_approvals").insert({ warning_id: data.id, approver_id: form.approver_id });
-      if (approvalError) { await supabase.from("warning_cases").update({ status: "draft" }).eq("id", data.id); setError("สร้างรายการแล้ว แต่ส่งอนุมัติไม่สำเร็จ: " + approvalError.message); setBusy(false); return; }
+    if (form.approver_id && warningId) {
+      const { error: approvalError } = await supabase.from("warning_approvals").insert({ warning_id: warningId, approver_id: form.approver_id });
+      if (approvalError) {
+        if (!editingId) await supabase.from("warning_cases").update({ status: "draft" }).eq("id", warningId);
+        else await supabase.from("warning_cases").update({ status: "draft", updated_by: userId }).eq("id", warningId);
+        setError("บันทึกหนังสือแล้ว แต่ส่งอนุมัติไม่สำเร็จ: " + approvalError.message); setBusy(false); return;
+      }
     }
-    setBusy(false); setShowForm(false); setForm({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false }); setEvidence(null); onSaved();
+    setBusy(false); closeForm(); onSaved();
   }
+
   async function sign(warningId: string, step: string) {
     if (!supabase) return;
     const consent = window.confirm("ยืนยันการลงนามอิเล็กทรอนิกส์ในเอกสารฉบับนี้หรือไม่? การลงนามจะถูกบันทึกพร้อมเวลาและหลักฐานตรวจสอบย้อนหลัง");
     if (!consent) return;
-    const { error } = await supabase.rpc("sign_warning", { p_warning_id: warningId, p_signature_step: step, p_signer_name: profile.full_name, p_consent_text: "ข้าพเจ้ายืนยันตัวตนและยินยอมลงนามอิเล็กทรอนิกส์ในหนังสือเตือนฉบับนี้" });
-    if (error) window.alert("ลงนามไม่สำเร็จ: " + error.message); else onSaved();
+    const { error: signError } = await supabase.rpc("sign_warning", { p_warning_id: warningId, p_signature_step: step, p_signer_name: profile.full_name, p_consent_text: "ข้าพเจ้ายืนยันตัวตนและยินยอมลงนามอิเล็กทรอนิกส์ในหนังสือเตือนฉบับนี้" });
+    if (signError) window.alert("ลงนามไม่สำเร็จ: " + signError.message); else onSaved();
   }
-  return <><div className="toolbar"><div><strong>ทะเบียนหนังสือเตือน</strong><span>{filtered.length} รายการ</span></div>{canCreate && <button className="primary-small" onClick={() => setShowForm(!showForm)}><Plus size={16} /> สร้างหนังสือเตือน</button>}</div>
-    {showForm && <form className="form-panel" onSubmit={save}><div className="form-head"><strong>บันทึกเหตุการณ์และเสนออนุมัติ</strong><button type="button" className="close-btn" onClick={() => setShowForm(false)}><X size={17} /></button></div><div className="form-grid">
-      <label>บริษัท<select value={companyId} onChange={e => { setForm({ ...form, employee_id: "" }); onCompanyChange(e.target.value); }}>{companies.map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select></label>
+
+  return <>
+    <div className="toolbar"><div><strong>ทะเบียนหนังสือเตือน</strong><span>{filtered.length} รายการ</span></div>{canCreate && <button className="primary-small" onClick={() => { closeForm(); setShowForm(true); }}><Plus size={16} /> สร้างหนังสือเตือน</button>}</div>
+    {showForm && <form className="form-panel" onSubmit={save}><div className="form-head"><strong>{editingId ? "แก้ไขหนังสือเตือนฉบับร่าง" : "บันทึกเหตุการณ์และเสนออนุมัติ"}</strong><button type="button" className="close-btn" onClick={closeForm}><X size={17} /></button></div><div className="form-grid">
+      <label>บริษัท<select value={companyId} disabled={!!editingId} onChange={e => { setForm({ ...form, employee_id: "" }); onCompanyChange(e.target.value); }}>{companies.map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select></label>
       <label className="span-2">พนักงาน<select required value={form.employee_id} onChange={e => setForm({ ...form, employee_id: e.target.value })}><option value="">เลือกพนักงาน</option>{employees.filter(x => x.status === "active").map(x => <option key={x.id} value={x.id}>{x.employee_code} · {x.first_name} {x.last_name}</option>)}</select></label>
       <label>วันที่เกิดเหตุ<input type="date" required value={form.incident_date} onChange={e => setForm({ ...form, incident_date: e.target.value })} /></label>
       <label>ประเภทเหตุการณ์<input required value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="เช่น ขาดงาน / มาสาย / ฝ่าฝืนระเบียบ" /></label>
       <label>ระดับการเตือน<select value={form.warning_level} disabled={profile.role === "supervisor"} onChange={e => setForm({ ...form, warning_level: e.target.value })}>{Object.entries(levelLabels).filter(([v]) => profile.role !== "supervisor" || v === "verbal").map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
       <label>ผู้อนุมัติ<select value={form.approver_id} onChange={e => setForm({ ...form, approver_id: e.target.value })}><option value="">บันทึกเป็นฉบับร่าง</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.full_name} ({roleLabels[p.role]})</option>)}</select></label>
       <label className="span-2">รายละเอียดเหตุการณ์<textarea required rows={4} value={form.incident_description} onChange={e => setForm({ ...form, incident_description: e.target.value })} /></label>
-      <label className="span-2">แนบหลักฐาน (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e => setEvidence(e.target.files?.[0] || null)} /></label>
-    {(profile.role === "hr_officer" || profile.role === "system_admin") && <label className="span-2"><input type="checkbox" checked={form.executive_ack_required} onChange={e => setForm({ ...form, executive_ack_required: e.target.checked })} /> กำหนดให้ผู้บริหารลงนามรับทราบหนังสือฉบับนี้</label>}</div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !employees.length}>{busy ? "กำลังบันทึก..." : "บันทึกข้อมูล"}</button>{!employees.length && <p className="small-note">กรุณาเพิ่มข้อมูลพนักงานก่อนสร้างหนังสือเตือน</p>}</form>}
-    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td>{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{(profile.role === "supervisor" || profile.role === "hr_officer") && !signatures.some(s => s.warning_id === w.id && s.signature_step === "issuer") && <button className="table-action" onClick={() => void sign(w.id,"issuer")}>ลงนามผู้ออก</button>}{profile.role === "hr_manager" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "hr_manager_ack") && <button className="table-action" onClick={() => void sign(w.id,"hr_manager_ack")}>ลงนาม HR Manager</button>}{profile.role === "executive" && w.executive_ack_required && !signatures.some(s => s.warning_id === w.id && s.signature_step === "executive_ack") && <button className="table-action" onClick={() => void sign(w.id,"executive_ack")}>ลงนามผู้บริหาร</button>}{profile.role === "employee" && profile.employee_id === w.employee_id && w.status === "issued" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "employee_ack") && <button className="table-action" onClick={() => void sign(w.id,"employee_ack")}>ลงนามรับทราบ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
+      <label className="span-2">แนบหลักฐานเพิ่มเติม (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e => setEvidence(e.target.files?.[0] || null)} /></label>
+      {(profile.role === "hr_officer" || profile.role === "system_admin") && <label className="span-2"><input type="checkbox" checked={form.executive_ack_required} onChange={e => setForm({ ...form, executive_ack_required: e.target.checked })} /> กำหนดให้ผู้บริหารลงนามรับทราบหนังสือฉบับนี้</label>}
+    </div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !employees.length}>{busy ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "บันทึกข้อมูล"}</button>{!employees.length && <p className="small-note">กรุณาเพิ่มข้อมูลพนักงานก่อนสร้างหนังสือเตือน</p>}</form>}
+    <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td>{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{canEditDraft(w) && <button className="table-action" onClick={() => startEdit(w)}>แก้ไขฉบับร่าง</button>}{(profile.role === "supervisor" || profile.role === "hr_officer") && !signatures.some(s => s.warning_id === w.id && s.signature_step === "issuer") && <button className="table-action" onClick={() => void sign(w.id,"issuer")}>ลงนามผู้ออก</button>}{profile.role === "hr_manager" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "hr_manager_ack") && <button className="table-action" onClick={() => void sign(w.id,"hr_manager_ack")}>ลงนาม HR Manager</button>}{profile.role === "executive" && w.executive_ack_required && !signatures.some(s => s.warning_id === w.id && s.signature_step === "executive_ack") && <button className="table-action" onClick={() => void sign(w.id,"executive_ack")}>ลงนามผู้บริหาร</button>}{profile.role === "employee" && profile.employee_id === w.employee_id && w.status === "issued" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "employee_ack") && <button className="table-action" onClick={() => void sign(w.id,"employee_ack")}>ลงนามรับทราบ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
   </>;
 }
 
@@ -435,6 +479,7 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
   });
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
 
   async function createUser(event: FormEvent) {
     event.preventDefault();
@@ -464,7 +509,7 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
         <div className="form-grid">
           <label>ชื่อ-นามสกุล<input required value={newUser.full_name} onChange={e => setNewUser({ ...newUser, full_name: e.target.value })} /></label>
           <label>อีเมล<input type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} /></label>
-          <label>รหัสผ่านเริ่มต้น<input type="password" minLength={8} required value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} /></label>
+          <label>รหัสผ่านเริ่มต้น<div className="password-field"><input type={showNewUserPassword ? "text" : "password"} minLength={8} required value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} /><button type="button" className="password-toggle" aria-label={showNewUserPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"} onClick={() => setShowNewUserPassword(value => !value)}>{showNewUserPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label>
           <label>บทบาท<select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value as Role, employee_id: e.target.value === "employee" ? newUser.employee_id : null })}>{Object.entries(roleLabels).filter(([value]) => value !== "system_admin").map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           {newUser.role === "employee" && <label className="span-2">เชื่อมทะเบียนพนักงาน<select required value={newUser.employee_id || ""} onChange={e => { const selected = employees.find(employee => employee.id === e.target.value); const ids = selected && !newUser.company_ids.includes(selected.company_id) ? [...newUser.company_ids, selected.company_id] : newUser.company_ids; setNewUser({ ...newUser, employee_id: e.target.value || null, company_ids: ids, default_company_id: selected?.company_id || newUser.default_company_id || ids[0] || "" }); }}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select></label>}
           <div className="span-2"><span className="field-label">บริษัทที่อนุญาตให้เข้าถึง</span><div className="company-access-list create-company-access">{companies.map(company => <label key={company.id}><input type="checkbox" checked={newUser.company_ids.includes(company.id)} onChange={e => setNewUser(current => { const ids = e.target.checked ? [...current.company_ids, company.id] : current.company_ids.filter(id => id !== company.id); const defaultId = ids.includes(current.default_company_id) ? current.default_company_id : ids[0] || ""; return { ...current, company_ids: ids, default_company_id: defaultId }; })} />{company.company_name}</label>)}</div></div>
@@ -484,199 +529,38 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
 }
 
 
-type ZipEntry = { name: string; bytes: Uint8Array };
-
-async function unzipEntries(bytes: Uint8Array, docxOnly = true, targetName?: string): Promise<ZipEntry[]> {
-  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  const view = new DataView(buffer);
-  const minOffset = Math.max(0, buffer.byteLength - 65557);
-  let eocd = -1;
-  for (let i = buffer.byteLength - 22; i >= minOffset; i--) {
-    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-  }
-  if (eocd < 0) throw new Error("ไม่พบโครงสร้าง ZIP ที่ถูกต้อง");
-  const entryCount = view.getUint16(eocd + 10, true);
-  let cursor = view.getUint32(eocd + 16, true);
-  const decoder = new TextDecoder("utf-8");
-  const output: ZipEntry[] = [];
-  for (let i = 0; i < entryCount; i++) {
-    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("ข้อมูล ZIP ไม่สมบูรณ์");
-    const method = view.getUint16(cursor + 10, true);
-    const compressedSize = view.getUint32(cursor + 20, true);
-    const nameLength = view.getUint16(cursor + 28, true);
-    const extraLength = view.getUint16(cursor + 30, true);
-    const commentLength = view.getUint16(cursor + 32, true);
-    const localOffset = view.getUint32(cursor + 42, true);
-    const name = decoder.decode(new Uint8Array(buffer, cursor + 46, nameLength));
-    cursor += 46 + nameLength + extraLength + commentLength;
-    if ((docxOnly && !name.toLowerCase().endsWith(".docx")) || (targetName && name.toLowerCase() !== targetName.toLowerCase()) || name.startsWith("__MACOSX/") || name.split("/").pop()?.startsWith("~$")) continue;
-    if (view.getUint32(localOffset, true) !== 0x04034b50) continue;
-    const localNameLength = view.getUint16(localOffset + 26, true);
-    const localExtraLength = view.getUint16(localOffset + 28, true);
-    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
-    const compressed = new Uint8Array(buffer, dataOffset, compressedSize);
-    let data: Uint8Array;
-    if (method === 0) data = compressed.slice();
-    else if (method === 8) {
-      const stream = new Blob([compressed.slice().buffer as ArrayBuffer]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-      data = new Uint8Array(await new Response(stream).arrayBuffer());
-    } else continue;
-    output.push({ name, bytes: data });
-  }
-  return output;
-}
-
-async function extractDocxText(bytes: Uint8Array): Promise<string> {
-  const entries = await unzipEntries(bytes, false, "word/document.xml");
-  const documentXml = entries.find(entry => entry.name.toLowerCase() === "word/document.xml");
-  if (!documentXml) throw new Error("ไม่พบเนื้อหา Word document.xml");
-  const xml = new DOMParser().parseFromString(new TextDecoder("utf-8").decode(documentXml.bytes), "application/xml");
-  if (xml.querySelector("parsererror")) throw new Error("อ่าน XML ในไฟล์ Word ไม่สำเร็จ");
-  return Array.from(xml.getElementsByTagName("w:p"))
-    .map(paragraph => Array.from(paragraph.getElementsByTagName("w:t")).map(node => node.textContent || "").join(""))
-    .join("\n");
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
-  return Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, "0")).join("");
-}
-
-function inferRegulationCategory(fileName: string, content: string, fallback: string): string {
-  const text = (fileName + " " + content.slice(0, 2500)).toLowerCase();
-  const rules: [string, string[]][] = [
-    ["discipline", ["วินัยและโทษทางวินัย", "วินัย", "discipline"]],
-    ["working_time", ["วันทำงาน", "เวลาทำงาน", "เวลาพัก", "working hours"]],
-    ["holidays", ["วันหยุด", "holiday"]],
-    ["wages", ["ค่าจ้าง", "เงินเดือน", "ค่าตอบแทน", "wage", "salary"]],
-    ["overtime", ["ล่วงเวลา", "ทำงานในวันหยุด", "overtime"]],
-    ["leave", ["การลา", "ลาป่วย", "ลากิจ", "พักร้อน", "leave"]],
-    ["welfare_safety", ["สวัสดิการ", "รักษาพยาบาล", "ความปลอดภัย", "welfare", "safety"]],
-    ["development", ["พัฒนาบุคลากร", "ฝึกอบรม", "development", "training"]],
-    ["grievances", ["ร้องทุกข์", "ข้อร้องเรียน", "grievance"]],
-    ["termination", ["เลิกจ้าง", "termination"]],
-    ["severance", ["ค่าชดเชย", "severance"]],
-    ["employment", ["การจ้างงาน", "สัญญาจ้าง", "employment"]],
-    ["acknowledgment", ["รับทราบ", "ความเข้าใจข้อบังคับ", "acknowledgment"]],
-    ["general", ["ข้อบังคับทั่วไป", "บททั่วไป", "general"]],
-  ];
-  return rules.find(([, terms]) => terms.some(term => text.includes(term)))?.[0] || fallback;
-}
-
-function RegulationsModule({ companyId, categories, documents, sections, canManage, query, userId, onSaved }: {
-  companyId: string; categories: RegulationCategory[]; documents: RegulationDocument[];
-  sections: RegulationSection[]; canManage: boolean; query: string; userId: string; onSaved: () => void;
+function RegulationsModule({ categories, documents, sections, query, onQueryChange }: {
+  categories: RegulationCategory[]; documents: RegulationDocument[]; sections: RegulationSection[];
+  query: string; onQueryChange: (value: string) => void;
 }) {
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const [showUpload, setShowUpload] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [fallbackCategory, setFallbackCategory] = useState("general");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
-  const filtered = sections.filter(section => {
-    const doc = documents.find(item => item.id === section.document_id);
-    const categoryMatch = selectedCategory === "all" || section.category_code === selectedCategory;
-    const searchable = [section.section_number || "", section.heading, section.content_text, doc?.title || "", doc?.document_code || ""].join(" ").toLowerCase();
-    return categoryMatch && (!query.trim() || searchable.includes(query.trim().toLowerCase()));
+  const filtered = sections.filter(item => {
+    const doc = documents.find(entry => entry.id === item.document_id);
+    const categoryMatch = selectedCategory === "all" || item.category_code === selectedCategory;
+    const searchable = [item.section_number || "", item.heading, item.content_text, doc?.title || "", doc?.document_code || ""].join(" ").toLocaleLowerCase("th-TH");
+    return categoryMatch && (!query.trim() || searchable.includes(query.trim().toLocaleLowerCase("th-TH")));
   });
+  const visibleDocuments = documents.filter(doc => selectedCategory === "all" || filtered.some(item => item.document_id === doc.id));
 
   async function openOriginal(doc: RegulationDocument) {
     if (!supabase || !doc.storage_path) return;
-    const { data, error: e } = await supabase.storage.from("company-regulations").createSignedUrl(doc.storage_path, 120);
-    if (e) window.alert("เปิดเอกสารต้นฉบับไม่สำเร็จ: " + e.message);
+    const { data, error: openError } = await supabase.storage.from("company-regulations").createSignedUrl(doc.storage_path, 120);
+    if (openError) window.alert("เปิดเอกสารต้นฉบับไม่สำเร็จ: " + openError.message);
     else window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   }
 
-  async function importWordArchive(event: FormEvent) {
-    event.preventDefault();
-    if (!supabase || !uploadFile || !companyId) return;
-    setBusy(true); setError(""); setNotice("");
-    try {
-      if (uploadFile.size > 25 * 1024 * 1024) throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 25 MB");
-      const inputBytes = new Uint8Array(await uploadFile.arrayBuffer());
-      const candidates = uploadFile.name.toLowerCase().endsWith(".zip")
-        ? await unzipEntries(inputBytes)
-        : uploadFile.name.toLowerCase().endsWith(".docx") ? [{ name: uploadFile.name, bytes: inputBytes }] : [];
-      if (!candidates.length) throw new Error("รองรับไฟล์ ZIP ที่บรรจุ Word .docx หรือไฟล์ .docx โดยตรง");
-      let imported = 0;
-      const issues: string[] = [];
-      for (const candidate of candidates) {
-        const originalName = candidate.name.split("/").pop() || candidate.name;
-        let content = "";
-        try { content = await extractDocxText(candidate.bytes); }
-        catch (extractError) { issues.push(originalName + ": " + (extractError instanceof Error ? extractError.message : "อ่านเนื้อหาไม่สำเร็จ")); continue; }
-        if (!content.trim()) { issues.push(originalName + ": ไม่พบข้อความในเอกสาร"); continue; }
-        const title = originalName.replace(/\.docx$/i, "");
-        const category = inferRegulationCategory(originalName, content, fallbackCategory);
-        const codeMatch = content.match(/(?:Document\s*No\.?|รหัสเอกสาร)\s*[:：]\s*([^\r\n]+)/i);
-        const revisionMatch = content.match(/Revision\s*[:：]\s*([^\r\n]+)/i);
-        const digest = await sha256Hex(candidate.bytes);
-        const { data: doc, error: insertError } = await supabase.from("regulation_documents").insert({
-          company_id: companyId, title, document_code: codeMatch?.[1]?.trim() || null,
-          revision: revisionMatch?.[1]?.trim() || null, original_file_name: originalName,
-          file_sha256: digest, source_status: "uploaded", uploaded_by: userId,
-        }).select("id").single();
-        if (insertError || !doc) { issues.push(originalName + ": " + (insertError?.message || "สร้างรายการเอกสารไม่สำเร็จ")); continue; }
-        const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const path = doc.id + "/" + safeName;
-        const blob = new Blob([candidate.bytes.slice().buffer as ArrayBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-        const { error: uploadError } = await supabase.storage.from("company-regulations").upload(path, blob, { contentType: blob.type, upsert: false });
-        if (uploadError) {
-          await supabase.from("regulation_documents").delete().eq("id", doc.id);
-          issues.push(originalName + ": อัปโหลดไฟล์ต้นฉบับไม่สำเร็จ - " + uploadError.message);
-          continue;
-        }
-        const { error: pathError } = await supabase.from("regulation_documents").update({ storage_path: path }).eq("id", doc.id);
-        if (pathError) {
-          await supabase.storage.from("company-regulations").remove([path]);
-          await supabase.from("regulation_documents").delete().eq("id", doc.id);
-          issues.push(originalName + ": บันทึกตำแหน่งไฟล์ไม่สำเร็จ - " + pathError.message);
-          continue;
-        }
-        const { error: sectionError } = await supabase.from("regulation_sections").insert({
-          document_id: doc.id, company_id: companyId, category_code: category,
-          section_number: "เนื้อหาเต็ม", heading: title, content_text: content,
-          sort_order: categories.find(item => item.category_code === category)?.sort_order || 99,
-        });
-        if (sectionError) {
-          await supabase.from("regulation_documents").update({ source_status: "needs_review" }).eq("id", doc.id);
-          issues.push(originalName + ": เก็บไฟล์แล้ว แต่สร้างดัชนีค้นหาไม่สำเร็จ - " + sectionError.message);
-          continue;
-        }
-        await supabase.from("regulation_documents").update({ source_status: "indexed" }).eq("id", doc.id);
-        imported++;
-      }
-      setNotice("นำเข้าและจัดทำดัชนีข้อความจาก Word สำเร็จ " + imported + " ไฟล์" + (issues.length ? " · มีรายการที่ต้องตรวจสอบ " + issues.length + " ไฟล์" : ""));
-      if (issues.length) setError(issues.join("\n"));
-      setUploadFile(null); setShowUpload(false); onSaved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "นำเข้าเอกสารไม่สำเร็จ");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return <>
-    <div className="toolbar"><div><strong>คลังระเบียบข้อบังคับการทำงาน</strong><span>{documents.length} เอกสาร · {sections.length} รายการเนื้อหาที่ค้นหาได้</span></div>{canManage && <button className="primary-small" onClick={() => setShowUpload(v => !v)}><Plus size={16} /> นำเข้า Word / ZIP</button>}</div>
-    <article className="panel regulation-intro"><div><h3>ค้นหาข้อบังคับตามหมวดและเนื้อหา</h3><p>เก็บไฟล์ต้นฉบับไว้ในพื้นที่ส่วนตัวของบริษัท และดึงข้อความจาก Word โดยตรงเพื่อค้นหา โดยไม่สรุปหรือเขียนเนื้อหากฎหมายใหม่</p></div></article>
-    {showUpload && <form className="form-panel" onSubmit={importWordArchive}><div className="form-head"><strong>นำเข้าเอกสาร Word</strong><button type="button" className="close-btn" onClick={() => setShowUpload(false)}><X size={17} /></button></div>
-      <div className="form-grid"><label>หมวดสำรองกรณีระบบจัดหมวดจากเนื้อหาไม่ได้<select value={fallbackCategory} onChange={e => setFallbackCategory(e.target.value)}>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label>
-      <label className="span-2">ไฟล์ Word (.docx) หรือ ZIP ที่บรรจุ Word หลายไฟล์<input type="file" accept=".zip,.docx,application/zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e => setUploadFile(e.target.files?.[0] || null)} required /></label></div>
-      <p className="small-note">รองรับ ZIP ขนาดไม่เกิน 25 MB ระบบจะแยกไฟล์ .docx ภายใน ดึงข้อความจากแต่ละเอกสาร จัดหมวดจากชื่อไฟล์/หัวข้อ และบันทึก SHA-256 ของไฟล์ต้นฉบับ</p>
-      {error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !uploadFile}>{busy ? "กำลังนำเข้าเอกสาร..." : "นำเข้าและจัดทำดัชนีค้นหา"}</button>
-    </form>}
-    {notice && <p className="success-text">{notice}</p>}
-    <div className="regulation-filters"><label>หมวดข้อบังคับ<select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}><option value="all">ทุกหมวด</option>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label></div>
+    <div className="toolbar"><div><strong>คลังระเบียบข้อบังคับมาตรฐานกลาง</strong><span>{documents.length} เอกสาร · {categories.length} หมวด</span></div></div>
+    <div className="regulation-search"><Search size={17} /><input value={query} onChange={e => onQueryChange(e.target.value)} placeholder="ค้นหาข้อบังคับ เช่น วันลา เวลาทำงาน ค่าชดเชย..." aria-label="ค้นหาข้อบังคับ" /><button type="button" className="table-action" onClick={() => onQueryChange("")} disabled={!query}>ล้าง</button></div>
+    <div className="regulation-filters"><label>หมวดข้อบังคับ<select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}><option value="all">ทุกหมวด</option>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label><span className="regulation-result-count">{filtered.length} รายการในหมวดที่เลือก</span></div>
     <div className="regulation-layout">
-      <aside className="panel regulation-documents"><div className="panel-head"><div><h3>เอกสารต้นฉบับ</h3><p>แยกตามบริษัทที่กำลังเลือก</p></div><FileText size={18} /></div>
-        {documents.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || doc.original_file_name || "ไฟล์ Word"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "อัปโหลดแล้ว"}</span></div>{doc.storage_path && <button className="table-action" onClick={() => void openOriginal(doc)}>เปิดต้นฉบับ</button>}</div>)}
-        {!documents.length && <EmptyState title="ยังไม่มีเอกสารต้นฉบับ" detail="นำเข้า ZIP หรือ Word ของบริษัทนี้เพื่อเริ่มต้น" />}
+      <aside className="panel regulation-documents"><div className="panel-head"><div><h3>เอกสารต้นฉบับ</h3><p>ข้อบังคับมาตรฐานกลาง ใช้ร่วมกันทุกบริษัท</p></div><FileText size={18} /></div>
+        {visibleDocuments.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || doc.original_file_name || "เอกสารข้อบังคับ"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "พร้อมอ่าน"}</span></div>{doc.storage_path && <button className="table-action" onClick={() => void openOriginal(doc)}>เปิดต้นฉบับ</button>}</div>)}
+        {!visibleDocuments.length && <EmptyState title="ไม่พบเอกสารในหมวดนี้" detail="ลองเลือกหมวดอื่นหรือค้นหาด้วยคำสำคัญ" />}
       </aside>
       <section className="regulation-results"><div className="section-title"><div><h2>ผลการค้นหาและเนื้อหาข้อบังคับ</h2><p>{filtered.length} รายการ {query ? "ตรงกับคำค้น" : "ในหมวดที่เลือก"}</p></div></div>
-        {filtered.map(section => <article className="panel regulation-section" key={section.id}><div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === section.category_code)?.category_name_th || section.category_code}</span><h3>{section.heading}</h3><small>{section.section_number || "—"} · {documents.find(doc => doc.id === section.document_id)?.title || "เอกสารต้นฉบับ"}</small></div></div><div className="regulation-content">{section.content_text}</div></article>)}
-        {!filtered.length && <EmptyState title="ไม่พบเนื้อหาข้อบังคับ" detail={documents.length ? "ลองเปลี่ยนหมวดหรือคำค้น หรือเพิ่มข้อความจากเอกสารต้นฉบับ" : "ยังไม่มีการนำเข้าเอกสารของบริษัทนี้"} />}
+        {filtered.map(item => <article className="panel regulation-section" key={item.id}><div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === item.category_code)?.category_name_th || item.category_code}</span><h3>{item.heading}</h3><small>{item.section_number || "—"} · {documents.find(doc => doc.id === item.document_id)?.title || "เอกสารต้นฉบับ"}</small></div></div><div className="regulation-content">{item.content_text}</div></article>)}
+        {!filtered.length && <EmptyState title="ไม่พบเนื้อหาข้อบังคับ" detail="ลองเปลี่ยนหมวดหรือคำค้นหา" />}
       </section>
     </div>
   </>;
