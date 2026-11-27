@@ -3,22 +3,27 @@ import type { FormEvent } from "react";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ClipboardList,
   FileCheck2, FileText, LayoutDashboard, LogOut, Plus, Search, Settings, ShieldCheck,
-  Users, X, RefreshCw, LockKeyhole, Download,
+  Users, X, RefreshCw, LockKeyhole, Download, BookOpen,
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 
-type Section = "overview" | "employees" | "warnings" | "approvals" | "reports" | "settings";
+type Section = "overview" | "employees" | "warnings" | "approvals" | "reports" | "regulations" | "settings";
 type Role = "system_admin" | "hr_officer" | "approver" | "viewer" | "supervisor" | "hr_manager" | "executive" | "employee";
-type Profile = { id: string; full_name: string; role: Role; is_active: boolean; employee_id?: string | null };
-type Department = { id: string; name: string };
+type Profile = { id: string; full_name: string; role: Role; is_active: boolean; employee_id?: string | null; default_company_id?: string | null };
+type Company = { id: string; company_code: string; company_name: string };
+type CompanyAccess = { profile_id: string; company_id: string };
+type RegulationCategory = { category_code: string; category_name_th: string; sort_order: number };
+type RegulationDocument = { id: string; company_id: string; title: string; document_code: string | null; revision: string | null; effective_date: string | null; original_file_name: string | null; storage_path: string | null; source_status: string; created_at: string };
+type RegulationSection = { id: string; document_id: string; company_id: string; category_code: string; section_number: string | null; heading: string; content_text: string; source_page: number | null; sort_order: number };
+type Department = { id: string; name: string; company_id?: string };
 type Employee = {
-  id: string; employee_code: string; first_name: string; last_name: string;
+  id: string; employee_code: string; first_name: string; last_name: string; company_id: string;
   department_id: string | null; job_title: string | null; status: string;
   employment_start_date: string | null; departments?: { name: string } | null;
 };
 type WarningCase = {
-  id: string; case_number: string; employee_id: string; incident_date: string;
+  id: string; case_number: string; employee_id: string; company_id: string; incident_date: string;
   category: string; incident_description: string; warning_level: string; status: string; executive_ack_required?: boolean;
   created_at: string; employees?: { employee_code: string; first_name: string; last_name: string } | null;
   warning_attachments?: { id: string; storage_path: string; original_file_name: string }[];
@@ -35,6 +40,7 @@ const navItems: { id: Section; label: string; icon: typeof LayoutDashboard }[] =
   { id: "warnings", label: "หนังสือเตือน", icon: FileText },
   { id: "approvals", label: "รออนุมัติ", icon: FileCheck2 },
   { id: "reports", label: "รายงาน", icon: ClipboardList },
+  { id: "regulations", label: "ระเบียบข้อบังคับ", icon: BookOpen },
   { id: "settings", label: "ตั้งค่าระบบ", icon: Settings },
 ];
 const roleLabels: Record<Role, string> = {
@@ -100,9 +106,16 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [activeCompanyId, setActiveCompanyId] = useState("");
+  const [companyAccess, setCompanyAccess] = useState<CompanyAccess[]>([]);
+  const [regulationCategories, setRegulationCategories] = useState<RegulationCategory[]>([]);
+  const [regulationDocuments, setRegulationDocuments] = useState<RegulationDocument[]>([]);
+  const [regulationSections, setRegulationSections] = useState<RegulationSection[]>([]);
   const [section, setSection] = useState<Section>("overview");
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [warnings, setWarnings] = useState<WarningCase[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -122,29 +135,70 @@ function App() {
   const loadData = useCallback(async () => {
     if (!supabase || !session) return;
     setLoading(true); setError("");
-    const [p, e, w, a, d, users, sigs] = await Promise.all([
-      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").eq("id", session.user.id).maybeSingle(),
-      supabase.from("employees").select("id,employee_code,first_name,last_name,department_id,job_title,status,employment_start_date,departments(name)").order("created_at", { ascending: false }),
-      supabase.from("warning_cases").select("id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").order("created_at", { ascending: false }),
-      supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases(id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").order("created_at", { ascending: false }),
-      supabase.from("departments").select("id,name").eq("is_active", true).order("name"),
-      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").order("full_name"),
-      supabase.from("warning_signatures").select("id,warning_id,signer_id,signature_step,signer_name,document_digest,signed_at").order("signed_at"),
+    const [p, companyResult] = await Promise.all([
+      supabase.from("profiles").select("id,full_name,role,is_active,employee_id,default_company_id").eq("id", session.user.id).maybeSingle(),
+      supabase.from("companies").select("id,company_code,company_name").eq("is_active", true).order("company_name"),
     ]);
     if (p.error) setError("ไม่สามารถอ่านโปรไฟล์ผู้ใช้งานได้: " + p.error.message);
     setProfile(p.data as Profile | null);
+    if (companyResult.error) {
+      setError("ไม่สามารถอ่านรายชื่อบริษัทที่ได้รับอนุญาตได้: " + companyResult.error.message);
+      setCompanies([]);
+      setLoading(false);
+      return;
+    }
+    const availableCompanies = (companyResult.data || []) as Company[];
+    setCompanies(availableCompanies);
+    const preferredCompany = p.data?.default_company_id;
+    const selectedCompany = activeCompanyId && availableCompanies.some(company => company.id === activeCompanyId)
+      ? activeCompanyId
+      : (preferredCompany && availableCompanies.some(company => company.id === preferredCompany)
+        ? preferredCompany
+        : availableCompanies[0]?.id || "");
+    if (!selectedCompany) {
+      setEmployees([]); setAllEmployees([]); setWarnings([]); setApprovals([]); setDepartments([]); setProfiles([]); setSignatures([]); setCompanyAccess([]); setRegulationCategories([]); setRegulationDocuments([]); setRegulationSections([]);
+      setError("บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าถึงบริษัทใด กรุณาติดต่อผู้ดูแลระบบ");
+      setLoading(false);
+      return;
+    }
+    if (selectedCompany !== activeCompanyId) {
+      setActiveCompanyId(selectedCompany);
+      setLoading(false);
+      return;
+    }
+    const [e, w, a, d, users, sigs, access, categories, documents, sections] = await Promise.all([
+      supabase.from("employees").select("id,employee_code,first_name,last_name,company_id,department_id,job_title,status,employment_start_date,departments(name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("warning_cases").select("id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases!inner(id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").eq("warning_cases.company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("departments").select("id,name,company_id").eq("company_id", selectedCompany).eq("is_active", true).order("name"),
+      supabase.from("profiles").select("id,full_name,role,is_active,employee_id,default_company_id").order("full_name"),
+      supabase.from("warning_signatures").select("id,warning_id,company_id,signer_id,signature_step,signer_name,document_digest,signed_at").eq("company_id", selectedCompany).order("signed_at"),
+      supabase.from("user_company_access").select("profile_id,company_id"),
+      supabase.from("regulation_categories").select("category_code,category_name_th,sort_order").order("sort_order"),
+      supabase.from("regulation_documents").select("id,company_id,title,document_code,revision,effective_date,original_file_name,storage_path,source_status,created_at").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("regulation_sections").select("id,document_id,company_id,category_code,section_number,heading,content_text,source_page,sort_order").eq("company_id", selectedCompany).order("sort_order"),
+    ]);
     setEmployees((e.data || []) as unknown as Employee[]);
+    if (p.data?.role === "system_admin") {
+      const allEmployeeResult = await supabase.from("employees").select("id,employee_code,first_name,last_name,company_id,department_id,job_title,status,employment_start_date,departments(name)").order("created_at", { ascending: false });
+      setAllEmployees((allEmployeeResult.data || []) as unknown as Employee[]);
+      if (allEmployeeResult.error) setError("โหลดทะเบียนพนักงานทุกบริษัทไม่สำเร็จ: " + allEmployeeResult.error.message);
+    } else setAllEmployees((e.data || []) as unknown as Employee[]);
     setWarnings((w.data || []) as unknown as WarningCase[]);
     setApprovals((a.data || []) as unknown as Approval[]);
     setDepartments((d.data || []) as Department[]);
     setProfiles((users.data || []) as Profile[]);
     setSignatures((sigs.data || []) as any[]);
-    const firstError = e.error || w.error || a.error || d.error || users.error || sigs.error;
+    setCompanyAccess((access.data || []) as CompanyAccess[]);
+    setRegulationCategories((categories.data || []) as RegulationCategory[]);
+    setRegulationDocuments((documents.data || []) as RegulationDocument[]);
+    setRegulationSections((sections.data || []) as RegulationSection[]);
+    const firstError = e.error || w.error || a.error || d.error || users.error || sigs.error || access.error || categories.error || documents.error || sections.error;
     if (firstError) setError("โหลดข้อมูลบางส่วนไม่สำเร็จ: " + firstError.message);
     setLoading(false);
-  }, [session]);
+  }, [session, activeCompanyId]);
 
-  useEffect(() => { if (session) void loadData(); else { setProfile(null); setEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
+  useEffect(() => { if (session) void loadData(); else { setProfile(null); setCompanies([]); setActiveCompanyId(""); setCompanyAccess([]); setEmployees([]); setAllEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
 
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3500); };
   async function signOut() { await supabase?.auth.signOut(); setSession(null); setProfile(null); }
@@ -183,16 +237,17 @@ function App() {
       <div className="sidebar-bottom"><div className="security-note"><ShieldCheck size={17} /><span>ระบบรักษาความปลอดภัย</span></div><button className="nav-item" onClick={signOut}><LogOut size={18} /><span>ออกจากระบบ</span></button></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="mobile-brand">STAR LIVE <span>/ WARNING</span></div><div className="top-search"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาข้อมูลในระบบ..." /></div><button className="icon-btn" onClick={() => void loadData()} aria-label="รีเฟรช"><RefreshCw size={17} /></button><div className="user-chip"><div className="avatar">{profile.full_name.slice(0, 1)}</div><div><strong>{profile.full_name}</strong><span>{roleLabels[profile.role]}</span></div><ChevronDown size={15} /></div></header>
+      <header className="topbar"><div className="mobile-brand">STAR LIVE <span>/ WARNING</span></div><div className="top-search"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาข้อมูลในระบบ..." /></div>{companies.length > 1 && <select className="company-switcher" aria-label="เลือกบริษัท" value={activeCompanyId} onChange={e => setActiveCompanyId(e.target.value)}>{companies.map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select>}<button className="icon-btn" onClick={() => void loadData()} aria-label="รีเฟรช"><RefreshCw size={17} /></button><div className="user-chip"><div className="avatar">{profile.full_name.slice(0, 1)}</div><div><strong>{profile.full_name}</strong><span>{roleLabels[profile.role]}</span></div><ChevronDown size={15} /></div></header>
       <section className="page-content">
-        <div className="page-heading"><div><p className="eyebrow">HUMAN RESOURCES / WARNING MANAGEMENT</p><h1>{active?.label}</h1><p className="muted">จัดการข้อมูลและติดตามกระบวนการด้านวินัยพนักงานอย่างเป็นระบบ</p></div><div className="date-chip">STAR LIVE ONLINE</div></div>
+        <div className="page-heading"><div><p className="eyebrow">HUMAN RESOURCES / WARNING MANAGEMENT</p><h1>{active?.label}</h1><p className="muted">จัดการข้อมูลและติดตามกระบวนการด้านวินัยพนักงานอย่างเป็นระบบ</p></div><div className="date-chip">{companies.find(company => company.id === activeCompanyId)?.company_name || "บริษัทที่เลือก"}</div></div>
         {error && <div className="inline-error">{error}</div>}
         {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={setSection} />}
-        {section === "employees" && <EmployeesModule employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
-        {section === "warnings" && <WarningsModule warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
+        {section === "employees" && <EmployeesModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
+        {section === "warnings" && <WarningsModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
-        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={employees} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
+        {section === "regulations" && <RegulationsModule companyId={activeCompanyId} categories={regulationCategories} documents={regulationDocuments} sections={regulationSections} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลระเบียบข้อบังคับแล้ว"); void loadData(); }} />}
+        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={allEmployees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
       </section>
     </main>
     {toast && <div className="toast-message"><CheckCircle2 size={17} />{toast}</div>}
@@ -231,27 +286,27 @@ function Overview({ employees, warnings, approvals, onGo }: { employees: Employe
 function EmptyState({ title, detail }: { title: string; detail: string }) { return <div className="empty-state"><div className="empty-icon"><ClipboardList size={25} /></div><strong>{title}</strong><span>{detail}</span></div>; }
 function StatusPill({ status }: { status: string }) { return <span className={"status-pill " + status}>{statusLabels[status] || status}</span>; }
 
-function EmployeesModule({ employees, departments, canManage, query, userId, onSaved }: { employees: Employee[]; departments: Department[]; canManage: boolean; query: string; userId: string; onSaved: () => void }) {
+function EmployeesModule({ companyId, companies, onCompanyChange, employees, departments, canManage, query, userId, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; employees: Employee[]; departments: Department[]; canManage: boolean; query: string; userId: string; onSaved: () => void }) {
   const [showForm, setShowForm] = useState(false); const [showDepartment, setShowDepartment] = useState(false); const [departmentName, setDepartmentName] = useState(""); const [departmentError, setDepartmentError] = useState(""); const [editingId, setEditingId] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [form, setForm] = useState({ employee_code: "", first_name: "", last_name: "", department_id: "", job_title: "", employment_start_date: "", status: "active" });
   const filtered = employees.filter(e => [e.employee_code, e.first_name, e.last_name, e.job_title || "", e.departments?.name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
   async function save(e: FormEvent) {
     e.preventDefault(); if (!supabase) return; setBusy(true); setError("");
-    const payload = { ...form, department_id: form.department_id || null, employment_start_date: form.employment_start_date || null, updated_at: new Date().toISOString() };
+    const payload = { ...form, company_id: companyId, department_id: form.department_id || null, employment_start_date: form.employment_start_date || null, updated_at: new Date().toISOString() };
     const result = editingId ? await supabase.from("employees").update(payload).eq("id", editingId) : await supabase.from("employees").insert({ ...payload, created_by: userId });
     setBusy(false); if (result.error) setError(result.error.message); else { setShowForm(false); setEditingId(""); setForm({ employee_code: "", first_name: "", last_name: "", department_id: "", job_title: "", employment_start_date: "", status: "active" }); onSaved(); }
   }
-  async function saveDepartment(e: FormEvent) { e.preventDefault(); if (!supabase) return; setDepartmentError(""); const { error } = await supabase.from("departments").insert({ name: departmentName.trim() }); if (error) setDepartmentError(error.message); else { setDepartmentName(""); setShowDepartment(false); onSaved(); } }
+  async function saveDepartment(e: FormEvent) { e.preventDefault(); if (!supabase) return; setDepartmentError(""); const { error } = await supabase.from("departments").insert({ name: departmentName.trim(), company_id: companyId }); if (error) setDepartmentError(error.message); else { setDepartmentName(""); setShowDepartment(false); onSaved(); } }
   function editEmployee(employee: Employee) { setEditingId(employee.id); setForm({ employee_code: employee.employee_code, first_name: employee.first_name, last_name: employee.last_name, department_id: employee.department_id || "", job_title: employee.job_title || "", employment_start_date: employee.employment_start_date || "", status: employee.status }); setShowForm(true); }
   return <><div className="toolbar"><div><strong>ทะเบียนพนักงาน</strong><span>{filtered.length} รายการ</span></div>{canManage && <div className="toolbar-actions"><button className="secondary-small" onClick={() => setShowDepartment(!showDepartment)}>จัดการแผนก</button><button className="primary-small" onClick={() => { setEditingId(""); setForm({ employee_code: "", first_name: "", last_name: "", department_id: "", job_title: "", employment_start_date: "", status: "active" }); setShowForm(!showForm); }}><Plus size={16} /> เพิ่มพนักงาน</button></div>}</div>
     {showDepartment && <form className="form-panel department-form" onSubmit={saveDepartment}><div className="form-head"><strong>เพิ่มแผนก</strong><button type="button" className="close-btn" onClick={() => setShowDepartment(false)}><X size={17} /></button></div><div className="inline-form"><input required value={departmentName} onChange={e => setDepartmentName(e.target.value)} placeholder="ชื่อแผนก" /><button className="primary-small">บันทึกแผนก</button></div>{departmentError && <p className="error-text">{departmentError}</p>}</form>}
     {showForm && <form className="form-panel" onSubmit={save}><div className="form-head"><strong>{editingId ? "แก้ไขข้อมูลพนักงาน" : "เพิ่มข้อมูลพนักงาน"}</strong><button type="button" className="close-btn" onClick={() => setShowForm(false)}><X size={17} /></button></div><div className="form-grid">
-      <label>รหัสพนักงาน<input required value={form.employee_code} onChange={e => setForm({ ...form, employee_code: e.target.value })} /></label><label>ชื่อ<input required value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} /></label><label>นามสกุล<input required value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} /></label><label>แผนก<select value={form.department_id} onChange={e => setForm({ ...form, department_id: e.target.value })}><option value="">ไม่ระบุ</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label>ตำแหน่ง<input value={form.job_title} onChange={e => setForm({ ...form, job_title: e.target.value })} /></label><label>วันที่เริ่มงาน<input type="date" value={form.employment_start_date} onChange={e => setForm({ ...form, employment_start_date: e.target.value })} /></label><label>สถานะ<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{Object.entries(statusLabels).filter(([v]) => ["active","resigned","terminated","suspended"].includes(v)).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label></div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy}>{busy ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "บันทึกข้อมูลพนักงาน"}</button></form>}
+      <label>บริษัท<select disabled={!!editingId} value={companyId} onChange={e => onCompanyChange(e.target.value)}>{companies.map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select></label><label>รหัสพนักงาน<input required value={form.employee_code} onChange={e => setForm({ ...form, employee_code: e.target.value })} /></label><label>ชื่อ<input required value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} /></label><label>นามสกุล<input required value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} /></label><label>แผนก<select value={form.department_id} onChange={e => setForm({ ...form, department_id: e.target.value })}><option value="">ไม่ระบุ</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label>ตำแหน่ง<input value={form.job_title} onChange={e => setForm({ ...form, job_title: e.target.value })} /></label><label>วันที่เริ่มงาน<input type="date" value={form.employment_start_date} onChange={e => setForm({ ...form, employment_start_date: e.target.value })} /></label><label>สถานะ<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{Object.entries(statusLabels).filter(([v]) => ["active","resigned","terminated","suspended"].includes(v)).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label></div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy}>{busy ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "บันทึกข้อมูลพนักงาน"}</button></form>}
     <div className="table-wrap"><table><thead><tr><th>รหัสพนักงาน</th><th>ชื่อ-นามสกุล</th><th>แผนก</th><th>ตำแหน่ง</th><th>สถานะ</th>{canManage && <th>จัดการ</th>}</tr></thead><tbody>{filtered.map(e => <tr key={e.id}><td className="mono">{e.employee_code}</td><td><strong>{e.first_name} {e.last_name}</strong></td><td>{e.departments?.name || "—"}</td><td>{e.job_title || "—"}</td><td><StatusPill status={e.status} /></td>{canManage && <td><button className="table-action" onClick={() => editEmployee(e)}>แก้ไข</button></td>}</tr>)}</tbody></table>{!filtered.length && <EmptyState title="ไม่พบข้อมูลพนักงาน" detail={canManage ? "กดเพิ่มพนักงานเพื่อเริ่มบันทึกข้อมูล" : "ยังไม่มีข้อมูลในทะเบียนพนักงาน"} />}</div>
   </>;
 }
 
-function WarningsModule({ warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
+function WarningsModule({ companyId, companies, onCompanyChange, warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
   const [showForm, setShowForm] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [evidence, setEvidence] = useState<File | null>(null);
   const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
@@ -262,7 +317,7 @@ function WarningsModule({ warnings, employees, profiles, canManage, profile, sig
     if (evidence && (evidence.size > 10 * 1024 * 1024 || !["application/pdf","image/png","image/jpeg"].includes(evidence.type))) { setError("ไฟล์หลักฐานต้องเป็น PDF/JPG/PNG และมีขนาดไม่เกิน 10 MB"); setBusy(false); return; }
     const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
     const { data, error: err } = await supabase.from("warning_cases").insert({
-      case_number: caseNumber, employee_id: form.employee_id, incident_date: form.incident_date,
+      case_number: caseNumber, employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
       category: form.category, incident_description: form.incident_description,
       warning_level: form.warning_level, executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false, status: form.approver_id ? "pending_approval" : "draft", created_by: userId,
     }).select("id").single();
@@ -290,6 +345,7 @@ function WarningsModule({ warnings, employees, profiles, canManage, profile, sig
   }
   return <><div className="toolbar"><div><strong>ทะเบียนหนังสือเตือน</strong><span>{filtered.length} รายการ</span></div>{canCreate && <button className="primary-small" onClick={() => setShowForm(!showForm)}><Plus size={16} /> สร้างหนังสือเตือน</button>}</div>
     {showForm && <form className="form-panel" onSubmit={save}><div className="form-head"><strong>บันทึกเหตุการณ์และเสนออนุมัติ</strong><button type="button" className="close-btn" onClick={() => setShowForm(false)}><X size={17} /></button></div><div className="form-grid">
+      <label>บริษัท<select value={companyId} onChange={e => { setForm({ ...form, employee_id: "" }); onCompanyChange(e.target.value); }}>{companies.map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select></label>
       <label className="span-2">พนักงาน<select required value={form.employee_id} onChange={e => setForm({ ...form, employee_id: e.target.value })}><option value="">เลือกพนักงาน</option>{employees.filter(x => x.status === "active").map(x => <option key={x.id} value={x.id}>{x.employee_code} · {x.first_name} {x.last_name}</option>)}</select></label>
       <label>วันที่เกิดเหตุ<input type="date" required value={form.incident_date} onChange={e => setForm({ ...form, incident_date: e.target.value })} /></label>
       <label>ประเภทเหตุการณ์<input required value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="เช่น ขาดงาน / มาสาย / ฝ่าฝืนระเบียบ" /></label>
@@ -330,10 +386,209 @@ function ReportsModule({ employees, warnings }: { employees: Employee[]; warning
   </>;
 }
 
-function SettingsModule({ profile, profiles, employees, onRoleChange, onEmployeeLink, onBootstrap }: { profile: Profile; profiles: Profile[]; employees: Employee[]; onRoleChange: (id: string, role: Role) => void; onEmployeeLink: (id: string, employeeId: string) => void; onBootstrap: () => Promise<void> }) {
+function SettingsModule({ profile, profiles, employees, companies, companyAccess, onCompanyAccessChange, onRoleChange, onEmployeeLink, onBootstrap }: { profile: Profile; profiles: Profile[]; employees: Employee[]; companies: Company[]; companyAccess: CompanyAccess[]; onCompanyAccessChange: (profileId: string, companyId: string, checked: boolean) => void; onRoleChange: (id: string, role: Role) => void; onEmployeeLink: (id: string, employeeId: string) => void; onBootstrap: () => Promise<void> }) {
   return <><article className="panel settings-profile"><div className="avatar large">{profile.full_name.slice(0, 1)}</div><div><h3>{profile.full_name}</h3><p>{roleLabels[profile.role]} · {profile.is_active ? "ใช้งานอยู่" : "ระงับ"}</p></div></article>
-    {profile.role === "system_admin" ? <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>บัญชีใหม่จะเริ่มต้นเป็นผู้ดูข้อมูล ผู้ดูแลสามารถปรับบทบาทได้</p></div><Users size={19} /></div><div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th><th>เชื่อมข้อมูลพนักงาน</th></tr></thead><tbody>{profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td><td>{p.role === "employee" ? <select value={p.employee_id || ""} onChange={e => onEmployeeLink(p.id, e.target.value)}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select> : "—"}</td></tr>)}</tbody></table></div></article> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
+    {profile.role === "system_admin" ? <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>บัญชีใหม่จะเริ่มต้นเป็นผู้ดูข้อมูล ผู้ดูแลสามารถปรับบทบาทได้</p></div><Users size={19} /></div><div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th><th>เชื่อมข้อมูลพนักงาน</th><th>สิทธิ์เข้าถึงบริษัท</th></tr></thead><tbody>{profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td><td>{p.role === "employee" ? <select value={p.employee_id || ""} onChange={e => onEmployeeLink(p.id, e.target.value)}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select> : "—"}</td><td>{p.role === "system_admin" ? "ทุกบริษัท" : <div className="company-access-list">{companies.map(company => <label key={company.id}><input type="checkbox" checked={companyAccess.some(access => access.profile_id === p.id && access.company_id === company.id)} onChange={e => onCompanyAccessChange(p.id, company.id, e.target.checked)} />{company.company_code}</label>)}</div>}</td></tr>)}</tbody></table></div></article> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
     <article className="panel"><div className="panel-head"><div><h3>การเริ่มต้นผู้ดูแลระบบ</h3><p>ใช้ได้ครั้งเดียวในช่วงติดตั้งระบบเท่านั้น</p></div><ShieldCheck size={19} /></div><p className="small-note">การตั้งค่าผู้ดูแลครั้งแรกจะปิดถาวรเมื่อมีบัญชีผู้ดูแลระบบแล้ว</p><BootstrapAdmin onDone={onBootstrap} /></article>
+  </>;
+}
+
+
+type ZipEntry = { name: string; bytes: Uint8Array };
+
+async function unzipEntries(bytes: Uint8Array, docxOnly = true, targetName?: string): Promise<ZipEntry[]> {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const view = new DataView(buffer);
+  const minOffset = Math.max(0, buffer.byteLength - 65557);
+  let eocd = -1;
+  for (let i = buffer.byteLength - 22; i >= minOffset; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("ไม่พบโครงสร้าง ZIP ที่ถูกต้อง");
+  const entryCount = view.getUint16(eocd + 10, true);
+  let cursor = view.getUint32(eocd + 16, true);
+  const decoder = new TextDecoder("utf-8");
+  const output: ZipEntry[] = [];
+  for (let i = 0; i < entryCount; i++) {
+    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("ข้อมูล ZIP ไม่สมบูรณ์");
+    const method = view.getUint16(cursor + 10, true);
+    const compressedSize = view.getUint32(cursor + 20, true);
+    const nameLength = view.getUint16(cursor + 28, true);
+    const extraLength = view.getUint16(cursor + 30, true);
+    const commentLength = view.getUint16(cursor + 32, true);
+    const localOffset = view.getUint32(cursor + 42, true);
+    const name = decoder.decode(new Uint8Array(buffer, cursor + 46, nameLength));
+    cursor += 46 + nameLength + extraLength + commentLength;
+    if ((docxOnly && !name.toLowerCase().endsWith(".docx")) || (targetName && name.toLowerCase() !== targetName.toLowerCase()) || name.startsWith("__MACOSX/") || name.split("/").pop()?.startsWith("~$")) continue;
+    if (view.getUint32(localOffset, true) !== 0x04034b50) continue;
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = new Uint8Array(buffer, dataOffset, compressedSize);
+    let data: Uint8Array;
+    if (method === 0) data = compressed.slice();
+    else if (method === 8) {
+      const stream = new Blob([compressed.slice().buffer as ArrayBuffer]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      data = new Uint8Array(await new Response(stream).arrayBuffer());
+    } else continue;
+    output.push({ name, bytes: data });
+  }
+  return output;
+}
+
+async function extractDocxText(bytes: Uint8Array): Promise<string> {
+  const entries = await unzipEntries(bytes, false, "word/document.xml");
+  const documentXml = entries.find(entry => entry.name.toLowerCase() === "word/document.xml");
+  if (!documentXml) throw new Error("ไม่พบเนื้อหา Word document.xml");
+  const xml = new DOMParser().parseFromString(new TextDecoder("utf-8").decode(documentXml.bytes), "application/xml");
+  if (xml.querySelector("parsererror")) throw new Error("อ่าน XML ในไฟล์ Word ไม่สำเร็จ");
+  return Array.from(xml.getElementsByTagName("w:p"))
+    .map(paragraph => Array.from(paragraph.getElementsByTagName("w:t")).map(node => node.textContent || "").join(""))
+    .join("\n");
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
+  return Array.from(new Uint8Array(digest)).map(value => value.toString(16).padStart(2, "0")).join("");
+}
+
+function inferRegulationCategory(fileName: string, content: string, fallback: string): string {
+  const text = (fileName + " " + content.slice(0, 2500)).toLowerCase();
+  const rules: [string, string[]][] = [
+    ["discipline", ["วินัยและโทษทางวินัย", "วินัย", "discipline"]],
+    ["working_time", ["วันทำงาน", "เวลาทำงาน", "เวลาพัก", "working hours"]],
+    ["holidays", ["วันหยุด", "holiday"]],
+    ["wages", ["ค่าจ้าง", "เงินเดือน", "ค่าตอบแทน", "wage", "salary"]],
+    ["overtime", ["ล่วงเวลา", "ทำงานในวันหยุด", "overtime"]],
+    ["leave", ["การลา", "ลาป่วย", "ลากิจ", "พักร้อน", "leave"]],
+    ["welfare_safety", ["สวัสดิการ", "รักษาพยาบาล", "ความปลอดภัย", "welfare", "safety"]],
+    ["development", ["พัฒนาบุคลากร", "ฝึกอบรม", "development", "training"]],
+    ["grievances", ["ร้องทุกข์", "ข้อร้องเรียน", "grievance"]],
+    ["termination", ["เลิกจ้าง", "termination"]],
+    ["severance", ["ค่าชดเชย", "severance"]],
+    ["employment", ["การจ้างงาน", "สัญญาจ้าง", "employment"]],
+    ["acknowledgment", ["รับทราบ", "ความเข้าใจข้อบังคับ", "acknowledgment"]],
+    ["general", ["ข้อบังคับทั่วไป", "บททั่วไป", "general"]],
+  ];
+  return rules.find(([, terms]) => terms.some(term => text.includes(term)))?.[0] || fallback;
+}
+
+function RegulationsModule({ companyId, categories, documents, sections, canManage, query, userId, onSaved }: {
+  companyId: string; categories: RegulationCategory[]; documents: RegulationDocument[];
+  sections: RegulationSection[]; canManage: boolean; query: string; userId: string; onSaved: () => void;
+}) {
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [fallbackCategory, setFallbackCategory] = useState("general");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const filtered = sections.filter(section => {
+    const doc = documents.find(item => item.id === section.document_id);
+    const categoryMatch = selectedCategory === "all" || section.category_code === selectedCategory;
+    const searchable = [section.section_number || "", section.heading, section.content_text, doc?.title || "", doc?.document_code || ""].join(" ").toLowerCase();
+    return categoryMatch && (!query.trim() || searchable.includes(query.trim().toLowerCase()));
+  });
+
+  async function openOriginal(doc: RegulationDocument) {
+    if (!supabase || !doc.storage_path) return;
+    const { data, error: e } = await supabase.storage.from("company-regulations").createSignedUrl(doc.storage_path, 120);
+    if (e) window.alert("เปิดเอกสารต้นฉบับไม่สำเร็จ: " + e.message);
+    else window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function importWordArchive(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase || !uploadFile || !companyId) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      if (uploadFile.size > 25 * 1024 * 1024) throw new Error("ไฟล์ต้องมีขนาดไม่เกิน 25 MB");
+      const inputBytes = new Uint8Array(await uploadFile.arrayBuffer());
+      const candidates = uploadFile.name.toLowerCase().endsWith(".zip")
+        ? await unzipEntries(inputBytes)
+        : uploadFile.name.toLowerCase().endsWith(".docx") ? [{ name: uploadFile.name, bytes: inputBytes }] : [];
+      if (!candidates.length) throw new Error("รองรับไฟล์ ZIP ที่บรรจุ Word .docx หรือไฟล์ .docx โดยตรง");
+      let imported = 0;
+      const issues: string[] = [];
+      for (const candidate of candidates) {
+        const originalName = candidate.name.split("/").pop() || candidate.name;
+        let content = "";
+        try { content = await extractDocxText(candidate.bytes); }
+        catch (extractError) { issues.push(originalName + ": " + (extractError instanceof Error ? extractError.message : "อ่านเนื้อหาไม่สำเร็จ")); continue; }
+        if (!content.trim()) { issues.push(originalName + ": ไม่พบข้อความในเอกสาร"); continue; }
+        const title = originalName.replace(/\.docx$/i, "");
+        const category = inferRegulationCategory(originalName, content, fallbackCategory);
+        const codeMatch = content.match(/(?:Document\s*No\.?|รหัสเอกสาร)\s*[:：]\s*([^\r\n]+)/i);
+        const revisionMatch = content.match(/Revision\s*[:：]\s*([^\r\n]+)/i);
+        const digest = await sha256Hex(candidate.bytes);
+        const { data: doc, error: insertError } = await supabase.from("regulation_documents").insert({
+          company_id: companyId, title, document_code: codeMatch?.[1]?.trim() || null,
+          revision: revisionMatch?.[1]?.trim() || null, original_file_name: originalName,
+          file_sha256: digest, source_status: "uploaded", uploaded_by: userId,
+        }).select("id").single();
+        if (insertError || !doc) { issues.push(originalName + ": " + (insertError?.message || "สร้างรายการเอกสารไม่สำเร็จ")); continue; }
+        const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = doc.id + "/" + safeName;
+        const blob = new Blob([candidate.bytes.slice().buffer as ArrayBuffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        const { error: uploadError } = await supabase.storage.from("company-regulations").upload(path, blob, { contentType: blob.type, upsert: false });
+        if (uploadError) {
+          await supabase.from("regulation_documents").delete().eq("id", doc.id);
+          issues.push(originalName + ": อัปโหลดไฟล์ต้นฉบับไม่สำเร็จ - " + uploadError.message);
+          continue;
+        }
+        const { error: pathError } = await supabase.from("regulation_documents").update({ storage_path: path }).eq("id", doc.id);
+        if (pathError) {
+          await supabase.storage.from("company-regulations").remove([path]);
+          await supabase.from("regulation_documents").delete().eq("id", doc.id);
+          issues.push(originalName + ": บันทึกตำแหน่งไฟล์ไม่สำเร็จ - " + pathError.message);
+          continue;
+        }
+        const { error: sectionError } = await supabase.from("regulation_sections").insert({
+          document_id: doc.id, company_id: companyId, category_code: category,
+          section_number: "เนื้อหาเต็ม", heading: title, content_text: content,
+          sort_order: categories.find(item => item.category_code === category)?.sort_order || 99,
+        });
+        if (sectionError) {
+          await supabase.from("regulation_documents").update({ source_status: "needs_review" }).eq("id", doc.id);
+          issues.push(originalName + ": เก็บไฟล์แล้ว แต่สร้างดัชนีค้นหาไม่สำเร็จ - " + sectionError.message);
+          continue;
+        }
+        await supabase.from("regulation_documents").update({ source_status: "indexed" }).eq("id", doc.id);
+        imported++;
+      }
+      setNotice("นำเข้าและจัดทำดัชนีข้อความจาก Word สำเร็จ " + imported + " ไฟล์" + (issues.length ? " · มีรายการที่ต้องตรวจสอบ " + issues.length + " ไฟล์" : ""));
+      if (issues.length) setError(issues.join("\n"));
+      setUploadFile(null); setShowUpload(false); onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "นำเข้าเอกสารไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
+    <div className="toolbar"><div><strong>คลังระเบียบข้อบังคับการทำงาน</strong><span>{documents.length} เอกสาร · {sections.length} รายการเนื้อหาที่ค้นหาได้</span></div>{canManage && <button className="primary-small" onClick={() => setShowUpload(v => !v)}><Plus size={16} /> นำเข้า Word / ZIP</button>}</div>
+    <article className="panel regulation-intro"><div><h3>ค้นหาข้อบังคับตามหมวดและเนื้อหา</h3><p>เก็บไฟล์ต้นฉบับไว้ในพื้นที่ส่วนตัวของบริษัท และดึงข้อความจาก Word โดยตรงเพื่อค้นหา โดยไม่สรุปหรือเขียนเนื้อหากฎหมายใหม่</p></div></article>
+    {showUpload && <form className="form-panel" onSubmit={importWordArchive}><div className="form-head"><strong>นำเข้าเอกสาร Word</strong><button type="button" className="close-btn" onClick={() => setShowUpload(false)}><X size={17} /></button></div>
+      <div className="form-grid"><label>หมวดสำรองกรณีระบบจัดหมวดจากเนื้อหาไม่ได้<select value={fallbackCategory} onChange={e => setFallbackCategory(e.target.value)}>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label>
+      <label className="span-2">ไฟล์ Word (.docx) หรือ ZIP ที่บรรจุ Word หลายไฟล์<input type="file" accept=".zip,.docx,application/zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e => setUploadFile(e.target.files?.[0] || null)} required /></label></div>
+      <p className="small-note">รองรับ ZIP ขนาดไม่เกิน 25 MB ระบบจะแยกไฟล์ .docx ภายใน ดึงข้อความจากแต่ละเอกสาร จัดหมวดจากชื่อไฟล์/หัวข้อ และบันทึก SHA-256 ของไฟล์ต้นฉบับ</p>
+      {error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !uploadFile}>{busy ? "กำลังนำเข้าเอกสาร..." : "นำเข้าและจัดทำดัชนีค้นหา"}</button>
+    </form>}
+    {notice && <p className="success-text">{notice}</p>}
+    <div className="regulation-filters"><label>หมวดข้อบังคับ<select value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}><option value="all">ทุกหมวด</option>{categories.map(category => <option key={category.category_code} value={category.category_code}>{category.sort_order}. {category.category_name_th}</option>)}</select></label></div>
+    <div className="regulation-layout">
+      <aside className="panel regulation-documents"><div className="panel-head"><div><h3>เอกสารต้นฉบับ</h3><p>แยกตามบริษัทที่กำลังเลือก</p></div><FileText size={18} /></div>
+        {documents.map(doc => <div className="regulation-document" key={doc.id}><div><strong>{doc.title}</strong><small>{doc.document_code || doc.original_file_name || "ไฟล์ Word"}</small><span className={"source-status " + doc.source_status}>{doc.source_status === "indexed" ? "ค้นหาได้" : doc.source_status === "needs_review" ? "ต้องตรวจสอบ" : "อัปโหลดแล้ว"}</span></div>{doc.storage_path && <button className="table-action" onClick={() => void openOriginal(doc)}>เปิดต้นฉบับ</button>}</div>)}
+        {!documents.length && <EmptyState title="ยังไม่มีเอกสารต้นฉบับ" detail="นำเข้า ZIP หรือ Word ของบริษัทนี้เพื่อเริ่มต้น" />}
+      </aside>
+      <section className="regulation-results"><div className="section-title"><div><h2>ผลการค้นหาและเนื้อหาข้อบังคับ</h2><p>{filtered.length} รายการ {query ? "ตรงกับคำค้น" : "ในหมวดที่เลือก"}</p></div></div>
+        {filtered.map(section => <article className="panel regulation-section" key={section.id}><div className="regulation-section-head"><div><span>{categories.find(category => category.category_code === section.category_code)?.category_name_th || section.category_code}</span><h3>{section.heading}</h3><small>{section.section_number || "—"} · {documents.find(doc => doc.id === section.document_id)?.title || "เอกสารต้นฉบับ"}</small></div></div><div className="regulation-content">{section.content_text}</div></article>)}
+        {!filtered.length && <EmptyState title="ไม่พบเนื้อหาข้อบังคับ" detail={documents.length ? "ลองเปลี่ยนหมวดหรือคำค้น หรือเพิ่มข้อความจากเอกสารต้นฉบับ" : "ยังไม่มีการนำเข้าเอกสารของบริษัทนี้"} />}
+      </section>
+    </div>
   </>;
 }
 
