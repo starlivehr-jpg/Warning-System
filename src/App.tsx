@@ -386,7 +386,7 @@ function WarningDocumentPreview({ warning, signatures, onClose }: { warning: War
       <footer>เอกสารอิเล็กทรอนิกส์ · ลายเซ็นผูกกับค่า SHA-256 ของเอกสาร ณ เวลาที่ลงนาม</footer>
     </article></section></div>;
 }
-function WarningsModule({ companyId, companies, onCompanyChange, warnings, employees, profiles, canManage, profile, signatures, query, userId, regulations, regulationDocuments, companyName, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; regulations: RegulationSection[]; regulationDocuments: RegulationDocument[]; companyName: string; onSaved: () => void }) {
+function WarningsModule({ companyId, warnings, employees, profiles, canManage, profile, signatures, query, userId, regulations, regulationDocuments, companyName, onSaved }: { companyId: string; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; regulations: RegulationSection[]; regulationDocuments: RegulationDocument[]; companyName: string; onSaved: () => void }) {
   const [signatureTarget, setSignatureTarget] = useState<{ warningId: string; step: string } | null>(null);
   const [signatureBusy, setSignatureBusy] = useState(false);
   const [previewWarning, setPreviewWarning] = useState<WarningCase | null>(null);
