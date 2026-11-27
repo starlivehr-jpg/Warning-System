@@ -18,7 +18,7 @@ export type WarningLetterFormValue = {
 
 type EmployeeOption = {
   id: string; employee_code: string; first_name: string; last_name: string;
-  job_title: string | null; departments?: { name: string } | null;
+  job_title: string | null; status?: string; departments?: { name: string } | null;
 };
 type RegulationOption = {
   id: string; section_number: string | null; heading: string; content_text: string;
