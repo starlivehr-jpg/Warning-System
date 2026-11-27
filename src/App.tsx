@@ -396,7 +396,7 @@ function SettingsModule({ profile, profiles, employees, companies, companyAccess
 
 type ZipEntry = { name: string; bytes: Uint8Array };
 
-async function unzipEntries(bytes: Uint8Array, docxOnly = true): Promise<ZipEntry[]> {
+async function unzipEntries(bytes: Uint8Array, docxOnly = true, targetName?: string): Promise<ZipEntry[]> {
   const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   const view = new DataView(buffer);
   const minOffset = Math.max(0, buffer.byteLength - 65557);
@@ -419,7 +419,7 @@ async function unzipEntries(bytes: Uint8Array, docxOnly = true): Promise<ZipEntr
     const localOffset = view.getUint32(cursor + 42, true);
     const name = decoder.decode(new Uint8Array(buffer, cursor + 46, nameLength));
     cursor += 46 + nameLength + extraLength + commentLength;
-    if ((docxOnly && !name.toLowerCase().endsWith(".docx")) || name.startsWith("__MACOSX/") || name.split("/").pop()?.startsWith("~$")) continue;
+    if ((docxOnly && !name.toLowerCase().endsWith(".docx")) || (targetName && name.toLowerCase() !== targetName.toLowerCase()) || name.startsWith("__MACOSX/") || name.split("/").pop()?.startsWith("~$")) continue;
     if (view.getUint32(localOffset, true) !== 0x04034b50) continue;
     const localNameLength = view.getUint16(localOffset + 26, true);
     const localExtraLength = view.getUint16(localOffset + 28, true);
@@ -437,7 +437,7 @@ async function unzipEntries(bytes: Uint8Array, docxOnly = true): Promise<ZipEntr
 }
 
 async function extractDocxText(bytes: Uint8Array): Promise<string> {
-  const entries = await unzipEntries(bytes, false);
+  const entries = await unzipEntries(bytes, false, "word/document.xml");
   const documentXml = entries.find(entry => entry.name.toLowerCase() === "word/document.xml");
   if (!documentXml) throw new Error("ไม่พบเนื้อหา Word document.xml");
   const xml = new DOMParser().parseFromString(new TextDecoder("utf-8").decode(documentXml.bytes), "application/xml");
