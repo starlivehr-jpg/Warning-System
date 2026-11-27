@@ -10,15 +10,17 @@ import { isSupabaseConfigured, supabase } from "./lib/supabase";
 
 type Section = "overview" | "employees" | "warnings" | "approvals" | "reports" | "settings";
 type Role = "system_admin" | "hr_officer" | "approver" | "viewer" | "supervisor" | "hr_manager" | "executive" | "employee";
-type Profile = { id: string; full_name: string; role: Role; is_active: boolean; employee_id?: string | null };
-type Department = { id: string; name: string };
+type Profile = { id: string; full_name: string; role: Role; is_active: boolean; employee_id?: string | null; default_company_id?: string | null };
+type Company = { id: string; company_code: string; company_name: string };
+type CompanyAccess = { profile_id: string; company_id: string };
+type Department = { id: string; name: string; company_id?: string };
 type Employee = {
-  id: string; employee_code: string; first_name: string; last_name: string;
+  id: string; employee_code: string; first_name: string; last_name: string; company_id: string;
   department_id: string | null; job_title: string | null; status: string;
   employment_start_date: string | null; departments?: { name: string } | null;
 };
 type WarningCase = {
-  id: string; case_number: string; employee_id: string; incident_date: string;
+  id: string; case_number: string; employee_id: string; company_id: string; incident_date: string;
   category: string; incident_description: string; warning_level: string; status: string; executive_ack_required?: boolean;
   created_at: string; employees?: { employee_code: string; first_name: string; last_name: string } | null;
   warning_attachments?: { id: string; storage_path: string; original_file_name: string }[];
@@ -100,6 +102,9 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [activeCompanyId, setActiveCompanyId] = useState("");
+  const [companyAccess, setCompanyAccess] = useState<CompanyAccess[]>([]);
   const [section, setSection] = useState<Section>("overview");
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -122,29 +127,59 @@ function App() {
   const loadData = useCallback(async () => {
     if (!supabase || !session) return;
     setLoading(true); setError("");
-    const [p, e, w, a, d, users, sigs] = await Promise.all([
-      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").eq("id", session.user.id).maybeSingle(),
-      supabase.from("employees").select("id,employee_code,first_name,last_name,department_id,job_title,status,employment_start_date,departments(name)").order("created_at", { ascending: false }),
-      supabase.from("warning_cases").select("id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").order("created_at", { ascending: false }),
-      supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases(id,case_number,employee_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").order("created_at", { ascending: false }),
-      supabase.from("departments").select("id,name").eq("is_active", true).order("name"),
-      supabase.from("profiles").select("id,full_name,role,is_active,employee_id").order("full_name"),
-      supabase.from("warning_signatures").select("id,warning_id,signer_id,signature_step,signer_name,document_digest,signed_at").order("signed_at"),
+    const [p, companyResult] = await Promise.all([
+      supabase.from("profiles").select("id,full_name,role,is_active,employee_id,default_company_id").eq("id", session.user.id).maybeSingle(),
+      supabase.from("companies").select("id,company_code,company_name").eq("is_active", true).order("company_name"),
     ]);
     if (p.error) setError("ไม่สามารถอ่านโปรไฟล์ผู้ใช้งานได้: " + p.error.message);
     setProfile(p.data as Profile | null);
+    if (companyResult.error) {
+      setError("ไม่สามารถอ่านรายชื่อบริษัทที่ได้รับอนุญาตได้: " + companyResult.error.message);
+      setCompanies([]);
+      setLoading(false);
+      return;
+    }
+    const availableCompanies = (companyResult.data || []) as Company[];
+    setCompanies(availableCompanies);
+    const preferredCompany = p.data?.default_company_id;
+    const selectedCompany = activeCompanyId && availableCompanies.some(company => company.id === activeCompanyId)
+      ? activeCompanyId
+      : (preferredCompany && availableCompanies.some(company => company.id === preferredCompany)
+        ? preferredCompany
+        : availableCompanies[0]?.id || "");
+    if (!selectedCompany) {
+      setEmployees([]); setWarnings([]); setApprovals([]); setDepartments([]); setProfiles([]); setSignatures([]); setCompanyAccess([]);
+      setError("บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าถึงบริษัทใด กรุณาติดต่อผู้ดูแลระบบ");
+      setLoading(false);
+      return;
+    }
+    if (selectedCompany !== activeCompanyId) {
+      setActiveCompanyId(selectedCompany);
+      setLoading(false);
+      return;
+    }
+    const [e, w, a, d, users, sigs, access] = await Promise.all([
+      supabase.from("employees").select("id,employee_code,first_name,last_name,company_id,department_id,job_title,status,employment_start_date,departments(name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("warning_cases").select("id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases(id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").eq("warning_cases.company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("departments").select("id,name,company_id").eq("company_id", selectedCompany).eq("is_active", true).order("name"),
+      supabase.from("profiles").select("id,full_name,role,is_active,employee_id,default_company_id").order("full_name"),
+      supabase.from("warning_signatures").select("id,warning_id,company_id,signer_id,signature_step,signer_name,document_digest,signed_at").eq("company_id", selectedCompany).order("signed_at"),
+      supabase.from("user_company_access").select("profile_id,company_id"),
+    ]);
     setEmployees((e.data || []) as unknown as Employee[]);
     setWarnings((w.data || []) as unknown as WarningCase[]);
     setApprovals((a.data || []) as unknown as Approval[]);
     setDepartments((d.data || []) as Department[]);
     setProfiles((users.data || []) as Profile[]);
     setSignatures((sigs.data || []) as any[]);
-    const firstError = e.error || w.error || a.error || d.error || users.error || sigs.error;
+    setCompanyAccess((access.data || []) as CompanyAccess[]);
+    const firstError = e.error || w.error || a.error || d.error || users.error || sigs.error || access.error;
     if (firstError) setError("โหลดข้อมูลบางส่วนไม่สำเร็จ: " + firstError.message);
     setLoading(false);
-  }, [session]);
+  }, [session, activeCompanyId]);
 
-  useEffect(() => { if (session) void loadData(); else { setProfile(null); setEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
+  useEffect(() => { if (session) void loadData(); else { setProfile(null); setCompanies([]); setActiveCompanyId(""); setCompanyAccess([]); setEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
 
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3500); };
   async function signOut() { await supabase?.auth.signOut(); setSession(null); setProfile(null); }
@@ -183,16 +218,16 @@ function App() {
       <div className="sidebar-bottom"><div className="security-note"><ShieldCheck size={17} /><span>ระบบรักษาความปลอดภัย</span></div><button className="nav-item" onClick={signOut}><LogOut size={18} /><span>ออกจากระบบ</span></button></div>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="mobile-brand">STAR LIVE <span>/ WARNING</span></div><div className="top-search"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาข้อมูลในระบบ..." /></div><button className="icon-btn" onClick={() => void loadData()} aria-label="รีเฟรช"><RefreshCw size={17} /></button><div className="user-chip"><div className="avatar">{profile.full_name.slice(0, 1)}</div><div><strong>{profile.full_name}</strong><span>{roleLabels[profile.role]}</span></div><ChevronDown size={15} /></div></header>
+      <header className="topbar"><div className="mobile-brand">STAR LIVE <span>/ WARNING</span></div><div className="top-search"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหาข้อมูลในระบบ..." /></div>{companies.length > 1 && <select className="company-switcher" aria-label="เลือกบริษัท" value={activeCompanyId} onChange={e => setActiveCompanyId(e.target.value)}>{companies.map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select>}<button className="icon-btn" onClick={() => void loadData()} aria-label="รีเฟรช"><RefreshCw size={17} /></button><div className="user-chip"><div className="avatar">{profile.full_name.slice(0, 1)}</div><div><strong>{profile.full_name}</strong><span>{roleLabels[profile.role]}</span></div><ChevronDown size={15} /></div></header>
       <section className="page-content">
-        <div className="page-heading"><div><p className="eyebrow">HUMAN RESOURCES / WARNING MANAGEMENT</p><h1>{active?.label}</h1><p className="muted">จัดการข้อมูลและติดตามกระบวนการด้านวินัยพนักงานอย่างเป็นระบบ</p></div><div className="date-chip">STAR LIVE ONLINE</div></div>
+        <div className="page-heading"><div><p className="eyebrow">HUMAN RESOURCES / WARNING MANAGEMENT</p><h1>{active?.label}</h1><p className="muted">จัดการข้อมูลและติดตามกระบวนการด้านวินัยพนักงานอย่างเป็นระบบ</p></div><div className="date-chip">{companies.find(company => company.id === activeCompanyId)?.company_name || "บริษัทที่เลือก"}</div></div>
         {error && <div className="inline-error">{error}</div>}
         {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={setSection} />}
-        {section === "employees" && <EmployeesModule employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
-        {section === "warnings" && <WarningsModule warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
+        {section === "employees" && <EmployeesModule companyId={activeCompanyId} employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
+        {section === "warnings" && <WarningsModule companyId={activeCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
-        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={employees} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
+        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={employees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
       </section>
     </main>
     {toast && <div className="toast-message"><CheckCircle2 size={17} />{toast}</div>}
@@ -231,17 +266,17 @@ function Overview({ employees, warnings, approvals, onGo }: { employees: Employe
 function EmptyState({ title, detail }: { title: string; detail: string }) { return <div className="empty-state"><div className="empty-icon"><ClipboardList size={25} /></div><strong>{title}</strong><span>{detail}</span></div>; }
 function StatusPill({ status }: { status: string }) { return <span className={"status-pill " + status}>{statusLabels[status] || status}</span>; }
 
-function EmployeesModule({ employees, departments, canManage, query, userId, onSaved }: { employees: Employee[]; departments: Department[]; canManage: boolean; query: string; userId: string; onSaved: () => void }) {
+function EmployeesModule({ companyId, employees, departments, canManage, query, userId, onSaved }: { companyId: string; employees: Employee[]; departments: Department[]; canManage: boolean; query: string; userId: string; onSaved: () => void }) {
   const [showForm, setShowForm] = useState(false); const [showDepartment, setShowDepartment] = useState(false); const [departmentName, setDepartmentName] = useState(""); const [departmentError, setDepartmentError] = useState(""); const [editingId, setEditingId] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [form, setForm] = useState({ employee_code: "", first_name: "", last_name: "", department_id: "", job_title: "", employment_start_date: "", status: "active" });
   const filtered = employees.filter(e => [e.employee_code, e.first_name, e.last_name, e.job_title || "", e.departments?.name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
   async function save(e: FormEvent) {
     e.preventDefault(); if (!supabase) return; setBusy(true); setError("");
-    const payload = { ...form, department_id: form.department_id || null, employment_start_date: form.employment_start_date || null, updated_at: new Date().toISOString() };
+    const payload = { ...form, company_id: companyId, department_id: form.department_id || null, employment_start_date: form.employment_start_date || null, updated_at: new Date().toISOString() };
     const result = editingId ? await supabase.from("employees").update(payload).eq("id", editingId) : await supabase.from("employees").insert({ ...payload, created_by: userId });
     setBusy(false); if (result.error) setError(result.error.message); else { setShowForm(false); setEditingId(""); setForm({ employee_code: "", first_name: "", last_name: "", department_id: "", job_title: "", employment_start_date: "", status: "active" }); onSaved(); }
   }
-  async function saveDepartment(e: FormEvent) { e.preventDefault(); if (!supabase) return; setDepartmentError(""); const { error } = await supabase.from("departments").insert({ name: departmentName.trim() }); if (error) setDepartmentError(error.message); else { setDepartmentName(""); setShowDepartment(false); onSaved(); } }
+  async function saveDepartment(e: FormEvent) { e.preventDefault(); if (!supabase) return; setDepartmentError(""); const { error } = await supabase.from("departments").insert({ name: departmentName.trim(), company_id: companyId }); if (error) setDepartmentError(error.message); else { setDepartmentName(""); setShowDepartment(false); onSaved(); } }
   function editEmployee(employee: Employee) { setEditingId(employee.id); setForm({ employee_code: employee.employee_code, first_name: employee.first_name, last_name: employee.last_name, department_id: employee.department_id || "", job_title: employee.job_title || "", employment_start_date: employee.employment_start_date || "", status: employee.status }); setShowForm(true); }
   return <><div className="toolbar"><div><strong>ทะเบียนพนักงาน</strong><span>{filtered.length} รายการ</span></div>{canManage && <div className="toolbar-actions"><button className="secondary-small" onClick={() => setShowDepartment(!showDepartment)}>จัดการแผนก</button><button className="primary-small" onClick={() => { setEditingId(""); setForm({ employee_code: "", first_name: "", last_name: "", department_id: "", job_title: "", employment_start_date: "", status: "active" }); setShowForm(!showForm); }}><Plus size={16} /> เพิ่มพนักงาน</button></div>}</div>
     {showDepartment && <form className="form-panel department-form" onSubmit={saveDepartment}><div className="form-head"><strong>เพิ่มแผนก</strong><button type="button" className="close-btn" onClick={() => setShowDepartment(false)}><X size={17} /></button></div><div className="inline-form"><input required value={departmentName} onChange={e => setDepartmentName(e.target.value)} placeholder="ชื่อแผนก" /><button className="primary-small">บันทึกแผนก</button></div>{departmentError && <p className="error-text">{departmentError}</p>}</form>}
@@ -251,7 +286,7 @@ function EmployeesModule({ employees, departments, canManage, query, userId, onS
   </>;
 }
 
-function WarningsModule({ warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
+function WarningsModule({ companyId, warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { companyId: string; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
   const [showForm, setShowForm] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const [evidence, setEvidence] = useState<File | null>(null);
   const [form, setForm] = useState({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
@@ -262,7 +297,7 @@ function WarningsModule({ warnings, employees, profiles, canManage, profile, sig
     if (evidence && (evidence.size > 10 * 1024 * 1024 || !["application/pdf","image/png","image/jpeg"].includes(evidence.type))) { setError("ไฟล์หลักฐานต้องเป็น PDF/JPG/PNG และมีขนาดไม่เกิน 10 MB"); setBusy(false); return; }
     const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
     const { data, error: err } = await supabase.from("warning_cases").insert({
-      case_number: caseNumber, employee_id: form.employee_id, incident_date: form.incident_date,
+      case_number: caseNumber, employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
       category: form.category, incident_description: form.incident_description,
       warning_level: form.warning_level, executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false, status: form.approver_id ? "pending_approval" : "draft", created_by: userId,
     }).select("id").single();
@@ -330,9 +365,9 @@ function ReportsModule({ employees, warnings }: { employees: Employee[]; warning
   </>;
 }
 
-function SettingsModule({ profile, profiles, employees, onRoleChange, onEmployeeLink, onBootstrap }: { profile: Profile; profiles: Profile[]; employees: Employee[]; onRoleChange: (id: string, role: Role) => void; onEmployeeLink: (id: string, employeeId: string) => void; onBootstrap: () => Promise<void> }) {
+function SettingsModule({ profile, profiles, employees, companies, companyAccess, onCompanyAccessChange, onRoleChange, onEmployeeLink, onBootstrap }: { profile: Profile; profiles: Profile[]; employees: Employee[]; companies: Company[]; companyAccess: CompanyAccess[]; onCompanyAccessChange: (profileId: string, companyId: string, checked: boolean) => void; onRoleChange: (id: string, role: Role) => void; onEmployeeLink: (id: string, employeeId: string) => void; onBootstrap: () => Promise<void> }) {
   return <><article className="panel settings-profile"><div className="avatar large">{profile.full_name.slice(0, 1)}</div><div><h3>{profile.full_name}</h3><p>{roleLabels[profile.role]} · {profile.is_active ? "ใช้งานอยู่" : "ระงับ"}</p></div></article>
-    {profile.role === "system_admin" ? <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>บัญชีใหม่จะเริ่มต้นเป็นผู้ดูข้อมูล ผู้ดูแลสามารถปรับบทบาทได้</p></div><Users size={19} /></div><div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th><th>เชื่อมข้อมูลพนักงาน</th></tr></thead><tbody>{profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td><td>{p.role === "employee" ? <select value={p.employee_id || ""} onChange={e => onEmployeeLink(p.id, e.target.value)}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select> : "—"}</td></tr>)}</tbody></table></div></article> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
+    {profile.role === "system_admin" ? <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>บัญชีใหม่จะเริ่มต้นเป็นผู้ดูข้อมูล ผู้ดูแลสามารถปรับบทบาทได้</p></div><Users size={19} /></div><div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th><th>เชื่อมข้อมูลพนักงาน</th><th>สิทธิ์เข้าถึงบริษัท</th></tr></thead><tbody>{profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td><td>{p.role === "employee" ? <select value={p.employee_id || ""} onChange={e => onEmployeeLink(p.id, e.target.value)}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select> : "—"}</td><td>{p.role === "system_admin" ? "ทุกบริษัท" : <div className="company-access-list">{companies.map(company => <label key={company.id}><input type="checkbox" checked={companyAccess.some(access => access.profile_id === p.id && access.company_id === company.id)} onChange={e => onCompanyAccessChange(p.id, company.id, e.target.checked)} />{company.company_code}</label>)}</div>}</td></tr>)}</tbody></table></div></article> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
     <article className="panel"><div className="panel-head"><div><h3>การเริ่มต้นผู้ดูแลระบบ</h3><p>ใช้ได้ครั้งเดียวในช่วงติดตั้งระบบเท่านั้น</p></div><ShieldCheck size={19} /></div><p className="small-note">การตั้งค่าผู้ดูแลครั้งแรกจะปิดถาวรเมื่อมีบัญชีผู้ดูแลระบบแล้ว</p><BootstrapAdmin onDone={onBootstrap} /></article>
   </>;
 }
