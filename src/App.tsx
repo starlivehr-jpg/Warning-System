@@ -110,7 +110,7 @@ function AuthScreen({ onSignedIn }: { onSignedIn: (session: Session) => void }) 
       <label>รหัสผ่าน<div className="password-field"><input type={showPassword ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={8} required value={password} onChange={e => setPassword(e.target.value)} placeholder="อย่างน้อย 8 ตัวอักษร" /><button type="button" className="password-toggle" onClick={() => setShowPassword(v => !v)}>{showPassword ? "ซ่อน" : "แสดง"}</button></div></label>
       {error && <p className="error-text">{error}</p>}{notice && <p className="success-text">{notice}</p>}
       <button className="primary-btn" disabled={busy}>{busy ? "กำลังดำเนินการ..." : mode === "login" ? "เข้าสู่ระบบ" : "สร้างบัญชี"}</button>
-      {mode === "login" && <button type="button" className="text-btn forgot-password" disabled={resetBusy} onClick={() => void requestPasswordReset()}>{resetBusy ? "กำลังส่งลิงก์..." : "ลืมรหัสผ่าน? ส่งลิงก์ยืนยันทางอีเมล"}</button>
+      {mode === "login" && <button type="button" className="text-btn forgot-password" disabled={resetBusy} onClick={() => void requestPasswordReset()}>{resetBusy ? "กำลังส่งลิงก์..." : "ลืมรหัสผ่าน? ส่งลิงก์ยืนยันทางอีเมล"}</button>}
     </form>
     <p className="login-foot">การสร้างบัญชีใหม่จะได้รับสิทธิ์เริ่มต้นเป็นผู้ดูข้อมูลเท่านั้น</p>
   </section></main>;
