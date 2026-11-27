@@ -365,7 +365,7 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
   }
   async function createEditableCopy(warning: WarningCase) {
     if (!supabase || !canCreateDraftRevision(warning)) return;
-    const confirmed = window.confirm("ฉบับร่างนี้มีลายเซ็นอิเล็กทรอนิกส์แล้ว จึงไม่สามารถแก้ไขเอกสารเดิมได้\\n\\nต้องการสร้างฉบับร่างใหม่จากข้อมูลฉบับนี้เพื่อแก้ไข โดยเก็บเอกสารและลายเซ็นเดิมไว้หรือไม่?");
+    const confirmed = window.confirm("ฉบับร่างนี้มีลายเซ็นอิเล็กทรอนิกส์แล้ว จึงไม่สามารถแก้ไขเอกสารเดิมได้\n\nต้องการสร้างฉบับร่างใหม่จากข้อมูลฉบับนี้เพื่อแก้ไข โดยเก็บเอกสารและลายเซ็นเดิมไว้หรือไม่?");
     if (!confirmed) return;
     const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
     const { error: copyError } = await supabase.from("warning_cases").insert({
@@ -375,7 +375,7 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
       executive_ack_required: !!warning.executive_ack_required, status: "draft", created_by: userId,
     });
     if (copyError) { window.alert("สร้างฉบับร่างใหม่ไม่สำเร็จ: " + copyError.message); return; }
-    window.alert("สร้างฉบับร่างใหม่สำหรับแก้ไขแล้ว\\nเลขที่เอกสาร: " + caseNumber + "\\nเอกสารเดิมและลายเซ็นเดิมยังคงอยู่โดยไม่เปลี่ยนแปลง");
+    window.alert("สร้างฉบับร่างใหม่สำหรับแก้ไขแล้ว\nเลขที่เอกสาร: " + caseNumber + "\nเอกสารเดิมและลายเซ็นเดิมยังคงอยู่โดยไม่เปลี่ยนแปลง");
     onSaved();
   }
 
