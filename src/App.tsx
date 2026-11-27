@@ -108,6 +108,7 @@ function App() {
   const [section, setSection] = useState<Section>("overview");
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [warnings, setWarnings] = useState<WarningCase[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -148,7 +149,7 @@ function App() {
         ? preferredCompany
         : availableCompanies[0]?.id || "");
     if (!selectedCompany) {
-      setEmployees([]); setWarnings([]); setApprovals([]); setDepartments([]); setProfiles([]); setSignatures([]); setCompanyAccess([]);
+      setEmployees([]); setAllEmployees([]); setWarnings([]); setApprovals([]); setDepartments([]); setProfiles([]); setSignatures([]); setCompanyAccess([]);
       setError("บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าถึงบริษัทใด กรุณาติดต่อผู้ดูแลระบบ");
       setLoading(false);
       return;
@@ -161,13 +162,18 @@ function App() {
     const [e, w, a, d, users, sigs, access] = await Promise.all([
       supabase.from("employees").select("id,employee_code,first_name,last_name,company_id,department_id,job_title,status,employment_start_date,departments(name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
       supabase.from("warning_cases").select("id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,executive_ack_required,created_at,employees(employee_code,first_name,last_name),warning_attachments(id,storage_path,original_file_name)").eq("company_id", selectedCompany).order("created_at", { ascending: false }),
-      supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases(id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").eq("warning_cases.company_id", selectedCompany).order("created_at", { ascending: false }),
+      supabase.from("warning_approvals").select("id,warning_id,decision,comments,warning_cases!inner(id,case_number,employee_id,company_id,incident_date,category,incident_description,warning_level,status,created_at,employees(employee_code,first_name,last_name))").eq("warning_cases.company_id", selectedCompany).order("created_at", { ascending: false }),
       supabase.from("departments").select("id,name,company_id").eq("company_id", selectedCompany).eq("is_active", true).order("name"),
       supabase.from("profiles").select("id,full_name,role,is_active,employee_id,default_company_id").order("full_name"),
       supabase.from("warning_signatures").select("id,warning_id,company_id,signer_id,signature_step,signer_name,document_digest,signed_at").eq("company_id", selectedCompany).order("signed_at"),
       supabase.from("user_company_access").select("profile_id,company_id"),
     ]);
     setEmployees((e.data || []) as unknown as Employee[]);
+    if (p.data?.role === "system_admin") {
+      const allEmployeeResult = await supabase.from("employees").select("id,employee_code,first_name,last_name,company_id,department_id,job_title,status,employment_start_date,departments(name)").order("created_at", { ascending: false });
+      setAllEmployees((allEmployeeResult.data || []) as unknown as Employee[]);
+      if (allEmployeeResult.error) setError("โหลดทะเบียนพนักงานทุกบริษัทไม่สำเร็จ: " + allEmployeeResult.error.message);
+    } else setAllEmployees((e.data || []) as unknown as Employee[]);
     setWarnings((w.data || []) as unknown as WarningCase[]);
     setApprovals((a.data || []) as unknown as Approval[]);
     setDepartments((d.data || []) as Department[]);
@@ -179,7 +185,7 @@ function App() {
     setLoading(false);
   }, [session, activeCompanyId]);
 
-  useEffect(() => { if (session) void loadData(); else { setProfile(null); setCompanies([]); setActiveCompanyId(""); setCompanyAccess([]); setEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
+  useEffect(() => { if (session) void loadData(); else { setProfile(null); setCompanies([]); setActiveCompanyId(""); setCompanyAccess([]); setEmployees([]); setAllEmployees([]); setWarnings([]); setApprovals([]); } }, [session, loadData]);
 
   const notify = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 3500); };
   async function signOut() { await supabase?.auth.signOut(); setSession(null); setProfile(null); }
@@ -227,7 +233,7 @@ function App() {
         {section === "warnings" && <WarningsModule companyId={activeCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
-        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={employees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
+        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={allEmployees} companies={companies} companyAccess={companyAccess} onCompanyAccessChange={async (profileId, companyId, checked) => { if (!supabase || !isAdmin) return; const result = checked ? await supabase.from("user_company_access").insert({ profile_id: profileId, company_id: companyId }) : await supabase.from("user_company_access").delete().eq("profile_id", profileId).eq("company_id", companyId); if (result.error) notify("ปรับสิทธิ์บริษัทไม่สำเร็จ: " + result.error.message); else { notify("ปรับสิทธิ์บริษัทแล้ว"); void loadData(); } }} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
       </section>
     </main>
     {toast && <div className="toast-message"><CheckCircle2 size={17} />{toast}</div>}
