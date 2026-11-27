@@ -61,7 +61,6 @@ export default function WarningLetterFields({ value, onChange, employees, regula
   function patch(partial: Partial<WarningLetterFormValue>) { onChange({ ...value, ...partial }); }
   function toggleClause(item: RegulationOption) {
     const key = item.id;
-    const existing = new Map(regulations.map(r => [r.id, r]));
     const current = selectedClauses.map(text => {
       const match = text.match(/^\[REF:([^\]]+)\]/);
       return match ? match[1] : "";
