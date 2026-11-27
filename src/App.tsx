@@ -354,7 +354,8 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
   const canEditDraft = (warning: WarningCase) => warning.status === "draft" && !hasSignature(warning.id) &&
     (profile.role === "system_admin" || profile.role === "hr_officer" || warning.created_by === userId);
   const canCreateDraftRevision = (warning: WarningCase) => warning.status === "draft" && hasSignature(warning.id) &&
-    (profile.role === "system_admin" || profile.role === "hr_officer" || warning.created_by === userId);
+    (profile.role === "system_admin" || profile.role === "hr_officer" || warning.created_by === userId ||
+      signatures.some(s => s.warning_id === warning.id && s.signature_step === "issuer" && s.signer_id === userId));
   const filtered = warnings.filter(w => [w.case_number, w.category, w.incident_description, w.employees?.first_name || "", w.employees?.last_name || ""].join(" ").toLowerCase().includes(query.toLowerCase()));
 
   function startEdit(warning: WarningCase) {
