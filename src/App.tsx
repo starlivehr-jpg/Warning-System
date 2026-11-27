@@ -421,9 +421,60 @@ function ReportsModule({ employees, warnings }: { employees: Employee[]; warning
   </>;
 }
 
-function SettingsModule({ profile, profiles, employees, companies, companyAccess, onCompanyAccessChange, onRoleChange, onEmployeeLink, onBootstrap }: { profile: Profile; profiles: Profile[]; employees: Employee[]; companies: Company[]; companyAccess: CompanyAccess[]; onCompanyAccessChange: (profileId: string, companyId: string, checked: boolean) => void; onRoleChange: (id: string, role: Role) => void; onEmployeeLink: (id: string, employeeId: string) => void; onBootstrap: () => Promise<void> }) {
-  return <><article className="panel settings-profile"><div className="avatar large">{profile.full_name.slice(0, 1)}</div><div><h3>{profile.full_name}</h3><p>{roleLabels[profile.role]} · {profile.is_active ? "ใช้งานอยู่" : "ระงับ"}</p></div></article>
-    {profile.role === "system_admin" ? <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>บัญชีใหม่จะเริ่มต้นเป็นผู้ดูข้อมูล ผู้ดูแลสามารถปรับบทบาทได้</p></div><Users size={19} /></div><div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th><th>เชื่อมข้อมูลพนักงาน</th><th>สิทธิ์เข้าถึงบริษัท</th></tr></thead><tbody>{profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td><td>{p.role === "employee" ? <select value={p.employee_id || ""} onChange={e => onEmployeeLink(p.id, e.target.value)}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select> : "—"}</td><td>{p.role === "system_admin" ? "ทุกบริษัท" : <div className="company-access-list">{companies.map(company => <label key={company.id}><input type="checkbox" checked={companyAccess.some(access => access.profile_id === p.id && access.company_id === company.id)} onChange={e => onCompanyAccessChange(p.id, company.id, e.target.checked)} />{company.company_code}</label>)}</div>}</td></tr>)}</tbody></table></div></article> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
+function SettingsModule({ profile, profiles, employees, companies, companyAccess, onCompanyAccessChange, onRoleChange, onEmployeeLink, onCreateUser, onResetPassword, onBootstrap }: {
+  profile: Profile; profiles: Profile[]; employees: Employee[]; companies: Company[]; companyAccess: CompanyAccess[];
+  onCompanyAccessChange: (profileId: string, companyId: string, checked: boolean) => void;
+  onRoleChange: (id: string, role: Role) => void; onEmployeeLink: (id: string, employeeId: string) => void;
+  onCreateUser: (input: AdminUserInput) => Promise<void>; onResetPassword: (userId: string, newPassword: string) => Promise<void>;
+  onBootstrap: () => Promise<void>;
+}) {
+  const [newUser, setNewUser] = useState<AdminUserInput>({
+    full_name: "", email: "", password: "", role: "viewer", employee_id: null,
+    company_ids: companies[0] ? [companies[0].id] : [], default_company_id: companies[0]?.id || "",
+  });
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  async function createUser(event: FormEvent) {
+    event.preventDefault();
+    if (!newUser.company_ids.length || !newUser.default_company_id) { setCreateError("กรุณากำหนดบริษัทที่เข้าถึงและบริษัทเริ่มต้น"); return; }
+    if (newUser.role === "employee" && !newUser.employee_id) { setCreateError("กรุณาเชื่อมบัญชีกับทะเบียนพนักงาน"); return; }
+    setCreateBusy(true); setCreateError("");
+    await onCreateUser(newUser);
+    setCreateBusy(false);
+    setNewUser({ full_name: "", email: "", password: "", role: "viewer", employee_id: null, company_ids: companies[0] ? [companies[0].id] : [], default_company_id: companies[0]?.id || "" });
+  }
+
+  async function resetPassword(target: Profile) {
+    const value = window.prompt("กำหนดรหัสผ่านใหม่สำหรับ " + target.full_name + " (อย่างน้อย 8 ตัวอักษร)");
+    if (value === null) return;
+    if (value.length < 8) { window.alert("รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร"); return; }
+    await onResetPassword(target.id, value);
+  }
+
+  return <>
+    <article className="panel settings-profile"><div className="avatar large">{profile.full_name.slice(0, 1)}</div><div><h3>{profile.full_name}</h3><p>{roleLabels[profile.role]} · {profile.is_active ? "ใช้งานอยู่" : "ระงับ"}</p></div></article>
+    {profile.role === "system_admin" ? <>
+      <form className="panel admin-create-user" onSubmit={createUser}>
+        <div className="panel-head"><div><h3>สร้างบัญชีผู้ใช้งาน</h3><p>บัญชีที่สร้างโดย System Admin จะยืนยันอีเมลให้ทันที ไม่ต้องรออีเมลยืนยัน</p></div><Users size={19} /></div>
+        <div className="form-grid">
+          <label>ชื่อ-นามสกุล<input required value={newUser.full_name} onChange={e => setNewUser({ ...newUser, full_name: e.target.value })} /></label>
+          <label>อีเมล<input type="email" required value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} /></label>
+          <label>รหัสผ่านเริ่มต้น<input type="password" minLength={8} required value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} /></label>
+          <label>บทบาท<select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value as Role, employee_id: e.target.value === "employee" ? newUser.employee_id : null })}>{Object.entries(roleLabels).filter(([value]) => value !== "system_admin").map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          {newUser.role === "employee" && <label className="span-2">เชื่อมทะเบียนพนักงาน<select required value={newUser.employee_id || ""} onChange={e => { const selected = employees.find(employee => employee.id === e.target.value); const ids = selected && !newUser.company_ids.includes(selected.company_id) ? [...newUser.company_ids, selected.company_id] : newUser.company_ids; setNewUser({ ...newUser, employee_id: e.target.value || null, company_ids: ids, default_company_id: newUser.default_company_id || selected?.company_id || ids[0] || "" }); }}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select></label>}
+          <div className="span-2"><span className="field-label">บริษัทที่อนุญาตให้เข้าถึง</span><div className="company-access-list create-company-access">{companies.map(company => <label key={company.id}><input type="checkbox" checked={newUser.company_ids.includes(company.id)} onChange={e => setNewUser(current => { const ids = e.target.checked ? [...current.company_ids, company.id] : current.company_ids.filter(id => id !== company.id); const defaultId = ids.includes(current.default_company_id) ? current.default_company_id : ids[0] || ""; return { ...current, company_ids: ids, default_company_id: defaultId }; })} />{company.company_name}</label>)}</div></div>
+          <label>บริษัทเริ่มต้น<select required value={newUser.default_company_id} onChange={e => setNewUser({ ...newUser, default_company_id: e.target.value })}>{companies.filter(company => newUser.company_ids.includes(company.id)).map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select></label>
+        </div>
+        {createError && <p className="error-text">{createError}</p>}
+        <button className="primary-btn" disabled={createBusy}>{createBusy ? "กำลังสร้างบัญชี..." : "สร้างบัญชีและกำหนดสิทธิ์"}</button>
+      </form>
+      <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>ปรับบทบาท เชื่อมทะเบียนพนักงาน และกำหนดบริษัทที่เข้าถึงได้</p></div><Users size={19} /></div>
+        <div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th><th>เชื่อมข้อมูลพนักงาน</th><th>สิทธิ์เข้าถึงบริษัท</th><th>รหัสผ่าน</th></tr></thead><tbody>
+          {profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td><td>{p.role === "employee" ? <select value={p.employee_id || ""} onChange={e => onEmployeeLink(p.id, e.target.value)}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select> : "—"}</td><td>{p.role === "system_admin" ? "ทุกบริษัท" : <div className="company-access-list">{companies.map(company => <label key={company.id}><input type="checkbox" checked={companyAccess.some(access => access.profile_id === p.id && access.company_id === company.id)} onChange={e => onCompanyAccessChange(p.id, company.id, e.target.checked)} />{company.company_code}</label>)}</div>}</td><td>{p.id !== profile.id && <button className="table-action" onClick={() => void resetPassword(p)}>รีเซ็ต</button>}</td></tr>)}
+        </tbody></table></div>
+      </article>
+    </> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานและการจัดการบัญชีดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
     <article className="panel"><div className="panel-head"><div><h3>การเริ่มต้นผู้ดูแลระบบ</h3><p>ใช้ได้ครั้งเดียวในช่วงติดตั้งระบบเท่านั้น</p></div><ShieldCheck size={19} /></div><p className="small-note">การตั้งค่าผู้ดูแลครั้งแรกจะปิดถาวรเมื่อมีบัญชีผู้ดูแลระบบแล้ว</p><BootstrapAdmin onDone={onBootstrap} /></article>
   </>;
 }
