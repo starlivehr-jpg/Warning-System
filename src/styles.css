@@ -30,6 +30,8 @@
 
 /* Drawn e-signature dialog and printable warning document */
 .modal-backdrop{position:fixed;inset:0;z-index:200;background:#10243acc;display:flex;align-items:center;justify-content:center;padding:20px}
+/* Keep the signature canvas above every preview, drawer and app stacking context. */
+.signature-backdrop{z-index:10000;isolation:isolate}
 .signature-dialog{width:min(760px,100%);background:#fff;border-radius:16px;padding:22px;box-shadow:0 22px 70px #06172c55}
 .signature-canvas{display:block;width:100%;height:auto;aspect-ratio:900/260;border:1px dashed #9aabba;border-radius:10px;background:#fff;touch-action:none;cursor:crosshair;margin:14px 0}
 .signature-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
