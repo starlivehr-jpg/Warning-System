@@ -1,120 +1,32 @@
 import { useMemo, useState } from "react";
-import { BookOpen, Search, UserRound, FileText } from "lucide-react";
-
-export type WarningLetterFormValue = {
-  employee_id: string;
-  incident_date: string;
-  incident_time: string;
-  incident_location: string;
-  category: string;
-  incident_description: string;
-  employee_explanation: string;
-  proposed_action: string;
-  regulation_text: string;
-  warning_level: string;
-  approver_id: string;
-  executive_ack_required: boolean;
-};
-
-type EmployeeOption = {
-  id: string; employee_code: string; first_name: string; last_name: string;
-  job_title: string | null; status?: string; departments?: { name: string } | null;
-};
-type RegulationOption = {
-  id: string; section_number: string | null; heading: string; content_text: string;
-  category_code: string; document_id: string;
-};
-type Props = {
-  value: WarningLetterFormValue;
-  onChange: (value: WarningLetterFormValue) => void;
-  employees: EmployeeOption[];
-  regulations: RegulationOption[];
-  documents: { id: string; title: string }[];
-  companyName: string;
-  approvers: { id: string; full_name: string; role: string }[];
-  role: string;
-  onEvidenceChange: (file: File | null) => void;
-  evidenceName?: string;
-};
-
-const levelOptions = [
-  ["verbal", "ตักเตือนด้วยวาจา (บันทึกหลักฐาน)"],
-  ["written_1", "ตักเตือนเป็นหนังสือ ครั้งที่ 1"],
-  ["written_2", "ตักเตือนเป็นหนังสือ ครั้งที่ 2"],
-  ["final_written", "ตักเตือนเป็นหนังสือ (ขั้นสุดท้าย)"],
-];
-
-export default function WarningLetterFields({ value, onChange, employees, regulations, documents, companyName, approvers, role, onEvidenceChange, evidenceName }: Props) {
-  const [regulationQuery, setRegulationQuery] = useState("");
-  const selectedEmployee = employees.find(e => e.id === value.employee_id);
-  const selectedClauses = useMemo(() => value.regulation_text ? value.regulation_text.split("\n---\n").filter(Boolean) : [], [value.regulation_text]);
-  const matching = useMemo(() => {
-    const q = regulationQuery.trim().toLocaleLowerCase("th-TH");
-    if (!q) return regulations.slice(0, 8);
-    const terms = q.split(/\s+/).filter(Boolean);
-    return regulations.map(item => {
-      const text = [item.section_number || "", item.heading, item.content_text, documents.find(d => d.id === item.document_id)?.title || ""].join(" ").toLocaleLowerCase("th-TH");
-      const score = terms.reduce((n, term) => n + (text.includes(term) ? (item.section_number?.toLocaleLowerCase("th-TH") === term ? 8 : 2) : 0), 0);
-      return { item, score };
-    }).filter(x => x.score > 0).sort((a,b) => b.score-a.score).slice(0, 12).map(x => x.item);
-  }, [regulationQuery, regulations, documents]);
-  function patch(partial: Partial<WarningLetterFormValue>) { onChange({ ...value, ...partial }); }
-  function toggleClause(item: RegulationOption) {
-    const key = item.id;
-    const current = selectedClauses.map(text => {
-      const match = text.match(/^\[REF:([^\]]+)\]/);
-      return match ? match[1] : "";
-    });
-    if (current.includes(key)) {
-      patch({ regulation_text: selectedClauses.filter(text => !text.startsWith("[REF:" + key + "]")).join("\n---\n") });
-      return;
-    }
-    const source = "[REF:" + key + "]" + (item.section_number ? item.section_number + " " : "") + item.heading + "\n" + item.content_text;
-    patch({ regulation_text: [...selectedClauses, source].join("\n---\n") });
-  }
-  const selectedIds = new Set(selectedClauses.map(t => t.match(/^\[REF:([^\]]+)\]/)?.[1]).filter(Boolean));
-  return <div className="warning-letter-builder">
-    <div className="letter-company-head"><div className="letter-brand-mark"><ShieldCheckIcon /></div><div><strong>{companyName}</strong><small>แบบฟอร์มหนังสือตักเตือนพนักงาน · WARNING LETTER</small></div></div>
-    <div className="letter-title"><h2>หนังสือตักเตือน (WARNING LETTER)</h2><p>เรื่อง แจ้งการกระทำผิดวินัยและข้อบังคับเกี่ยวกับการทำงาน</p></div>
-
-    <section className="letter-section">
-      <h3><UserRound size={16}/> 1. ข้อมูลผู้ถูกตักเตือน</h3>
-      <label>เลือกพนักงานจากทะเบียน<select required value={value.employee_id} onChange={e => patch({employee_id:e.target.value})}><option value="">เลือกพนักงาน</option>{employees.filter(e=>!e.status || e.status==="active").map(e=><option key={e.id} value={e.id}>{e.employee_code} · {e.first_name} {e.last_name}</option>)}</select></label>
-      {selectedEmployee && <div className="employee-auto-grid"><div><small>รหัสพนักงาน</small><strong>{selectedEmployee.employee_code}</strong></div><div><small>ชื่อ-นามสกุล</small><strong>{selectedEmployee.first_name} {selectedEmployee.last_name}</strong></div><div><small>ตำแหน่ง</small><strong>{selectedEmployee.job_title || "—"}</strong></div><div><small>แผนก / ฝ่าย</small><strong>{selectedEmployee.departments?.name || "—"}</strong></div></div>}
-    </section>
-
-    <section className="letter-section">
-      <h3><FileText size={16}/> 2. วัน เวลา สถานที่ และรายละเอียดการกระทำผิด</h3>
-      <div className="letter-grid three"><label>วันที่เกิดเหตุ<input type="date" required value={value.incident_date} onChange={e=>patch({incident_date:e.target.value})}/></label><label>เวลาประมาณ<input type="time" value={value.incident_time} onChange={e=>patch({incident_time:e.target.value})}/></label><label>สถานที่เกิดเหตุ<input value={value.incident_location} onChange={e=>patch({incident_location:e.target.value})} placeholder="ระบุสถานที่ / จุดปฏิบัติงาน"/></label></div>
-      <label>ประเภทเหตุการณ์<input required value={value.category} onChange={e=>patch({category:e.target.value})} placeholder="เช่น ขาดงาน / มาสาย / ฝ่าฝืนระเบียบ"/></label>
-      <label>รายละเอียดข้อเท็จจริงและพฤติการณ์<textarea required rows={5} value={value.incident_description} onChange={e=>patch({incident_description:e.target.value})} placeholder="ระบุข้อเท็จจริง วันเวลา เหตุการณ์ และพฤติการณ์ให้ชัดเจน"/></label>
-      <label>คำชี้แจงของพนักงาน (ถ้ามี)<textarea rows={3} value={value.employee_explanation} onChange={e=>patch({employee_explanation:e.target.value})} placeholder="บันทึกคำชี้แจงของพนักงาน"/></label>
-    </section>
-
-    <section className="letter-section">
-      <h3><BookOpen size={16}/> 3. ข้อบังคับเกี่ยวกับการทำงานที่เกี่ยวข้อง</h3>
-      <div className="letter-regulation-search"><Search size={16}/><input value={regulationQuery} onChange={e=>setRegulationQuery(e.target.value)} placeholder="ค้นหาคำสำคัญหรือเลขข้อ เช่น 10.2.1, มาสาย, การขาดงาน"/></div>
-      <p className="letter-helper">ระบบแนะนำข้อที่เกี่ยวข้องจากคลังข้อบังคับมาตรฐานกลาง เลือกได้มากกว่าหนึ่งข้อ</p>
-      <div className="letter-regulation-results">{matching.map(item=><label className="letter-regulation-option" key={item.id}><input type="checkbox" checked={selectedIds.has(item.id)} onChange={()=>toggleClause(item)}/><span><strong>{item.section_number || "ไม่ระบุเลขข้อ"} · {item.heading}</strong><small>{documents.find(d=>d.id===item.document_id)?.title || "ข้อบังคับมาตรฐานกลาง"}</small><span>{item.content_text.slice(0,260)}{item.content_text.length>260?"…":""}</span></span></label>)}{!matching.length&&<p className="letter-helper">ไม่พบข้อบังคับที่ตรงกับคำค้นหา</p>}</div>
-      {selectedClauses.length>0&&<div className="letter-selected-clauses"><strong>ข้อบังคับที่เลือก ({selectedClauses.length})</strong>{selectedClauses.map((clause,i)=><div key={i}>{clause.replace(/^\[REF:[^\]]+\]/,"")}</div>)}</div>}
-    </section>
-
-    <section className="letter-section">
-      <h3>4. ระดับการพิจารณาลงโทษทางวินัย</h3>
-      <div className="letter-level-grid">{levelOptions.map(([key,label])=><label key={key}><input type="radio" name="warning-level" checked={value.warning_level===key} disabled={role==="supervisor"&&key!=="verbal"} onChange={()=>patch({warning_level:key})}/>{label}</label>)}</div>
-      <label>แนวทางดำเนินการ / คำสั่งให้ปรับปรุงแก้ไข<textarea rows={3} value={value.proposed_action} onChange={e=>patch({proposed_action:e.target.value})} placeholder="ระบุแนวทางแก้ไขหรือการดำเนินการที่คาดหวัง"/></label>
-      <p className="letter-legal-note">หากพนักงานยังคงฝ่าฝืนหรือกระทำความผิดซ้ำภายในระยะเวลาตามกฎหมาย บริษัทจะพิจารณาดำเนินการทางวินัยตามข้อบังคับเกี่ยวกับการทำงานและกฎหมายที่เกี่ยวข้อง</p>
-    </section>
-
-    <section className="letter-section">
-      <h3>5. การเสนออนุมัติและลงนาม</h3>
-      <label>ผู้อนุมัติ<select value={value.approver_id} onChange={e=>patch({approver_id:e.target.value})}><option value="">บันทึกเป็นฉบับร่าง</option>{approvers.map(p=><option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label>
-      {(role==="hr_officer"||role==="system_admin")&&<label className="letter-check"><input type="checkbox" checked={value.executive_ack_required} onChange={e=>patch({executive_ack_required:e.target.checked})}/> กำหนดให้ผู้บริหารลงนามรับทราบหนังสือฉบับนี้</label>}
-      <div className="letter-signature-steps"><div><b>1. ผู้ออกหนังสือเตือน</b><small>ลงนามหลังได้รับอนุมัติ / ตามสิทธิ์เดิม</small></div><div><b>2. HR Manager</b><small>ลงนามรับทราบทุกฉบับ</small></div>{value.executive_ack_required&&<div><b>3. ผู้บริหาร</b><small>ลงนามตามที่ HR กำหนด</small></div>}<div><b>{value.executive_ack_required?"4":"3"}. พนักงาน</b><small>ลงนามรับทราบเป็นขั้นตอนสุดท้าย</small></div></div>
-      <label>แนบหลักฐานเพิ่มเติม (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e=>onEvidenceChange(e.target.files?.[0]||null)}/>{evidenceName&&<small>{evidenceName}</small>}</label>
-    </section>
-    <div className="letter-print-hint">แบบฟอร์มนี้จะถูกบันทึกเป็นหนังสือเตือนในระบบ และใช้ลำดับการลงนามอิเล็กทรอนิกส์ชุดเดิม</div>
-  </div>;
+import { BookOpen, Search, UserRound, FileText, Building2, Upload } from "lucide-react";
+export type WarningLetterFormValue = { employee_id:string; incident_date:string; incident_time:string; incident_location:string; category:string; incident_description:string; employee_explanation:string; proposed_action:string; regulation_text:string; warning_level:string; approver_id:string; executive_ack_required:boolean };
+type EmployeeOption={id:string;employee_code:string;first_name:string;last_name:string;job_title:string|null;status?:string;departments?:{name:string}|null};
+type RegulationOption={id:string;section_number:string|null;heading:string;content_text:string;category_code:string;document_id:string};
+type Props={value:WarningLetterFormValue;onChange:(v:WarningLetterFormValue)=>void;employees:EmployeeOption[];regulations:RegulationOption[];documents:{id:string;title:string}[];companyName:string;approvers:{id:string;full_name:string;role:string}[];role:string;onEvidenceChange:(f:File|null)=>void;evidenceName?:string};
+const levels=[["verbal","ตักเตือนด้วยวาจา (บันทึกหลักฐาน)"],["written_1","ตักเตือนเป็นหนังสือ ครั้งที่ 1"],["written_2","ตักเตือนเป็นหนังสือ ครั้งที่ 2"],["final_written","ตักเตือนเป็นหนังสือ (ขั้นสุดท้าย)"]];
+export default function WarningLetterFields({value,onChange,employees,regulations,documents,companyName,approvers,role,onEvidenceChange,evidenceName}:Props){
+ const [query,setQuery]=useState("");const [logo,setLogo]=useState("");
+ const employee=employees.find(e=>e.id===value.employee_id);
+ const selected=useMemo(()=>value.regulation_text?value.regulation_text.split("\n---\n").filter(Boolean):[],[value.regulation_text]);
+ const ids=new Set(selected.map(x=>x.match(/^\[REF:([^\]]+)\]/)?.[1]).filter(Boolean));
+ const results=useMemo(()=>{const q=query.trim().toLocaleLowerCase("th-TH");if(!q)return regulations.slice(0,7);const terms=q.split(/\s+/);return regulations.map(item=>{const text=[item.section_number||"",item.heading,item.content_text,documents.find(d=>d.id===item.document_id)?.title||""].join(" ").toLocaleLowerCase("th-TH");return {item,score:terms.reduce((n,t)=>n+(text.includes(t)?(item.section_number?.includes(t)?10:2):0),0)}}).filter(x=>x.score).sort((a,b)=>b.score-a.score).slice(0,9).map(x=>x.item)},[query,regulations,documents]);
+ const patch=(p:Partial<WarningLetterFormValue>)=>onChange({...value,...p});
+ const toggle=(item:RegulationOption)=>{const next=ids.has(item.id)?selected.filter(x=>!x.startsWith("[REF:"+item.id+"]")):[...selected,"[REF:"+item.id+"]"+(item.section_number?item.section_number+" ":"")+item.heading+"\n"+item.content_text];patch({regulation_text:next.join("\n---\n")})};
+ return <div className="source-letter-workspace">
+  <div className="source-letter-toolbar"><div><b>แบบฟอร์มหนังสือตักเตือน</b><small>A4 · 210 × 297 มม. · ยึดรูปแบบจากไฟล์ต้นฉบับ</small></div><label className="source-logo-upload"><Upload size={14}/> อัปโหลดโลโก้<input type="file" accept="image/*" onChange={e=>{const f=e.target.files?.[0];if(f){const r=new FileReader();r.onload=()=>setLogo(String(r.result));r.readAsDataURL(f)}}}/></label></div>
+  <article className="source-a4-page" id="warning-letter-a4">
+   <header className="source-letter-header"><div className="source-company"><div className="source-logo">{logo?<img src={logo} alt="โลโก้"/>:<Building2 size={25}/>}</div><div><b>{companyName}</b><small>เอกสารภายในบริษัท · WARNING LETTER</small></div></div><div className="source-doc-meta"><span>เลขที่เอกสาร: <b>กำหนดเมื่อบันทึก</b></span><span>วันที่ออก: <b>{new Intl.DateTimeFormat("th-TH").format(new Date())}</b></span></div></header>
+   <div className="source-letter-title"><h1>หนังสือตักเตือน (WARNING LETTER)</h1><p>เรื่อง แจ้งการกระทำผิดวินัยและข้อบังคับเกี่ยวกับการทำงาน</p></div>
+   <section className="source-employee-block"><h2><UserRound size={13}/> ข้อมูลผู้ถูกตักเตือน</h2><label>เรียน (ชื่อ-นามสกุล)<select required value={value.employee_id} onChange={e=>patch({employee_id:e.target.value})}><option value="">เลือกพนักงานจากทะเบียน</option>{employees.filter(e=>!e.status||e.status==="active").map(e=><option key={e.id} value={e.id}>{e.employee_code} · {e.first_name} {e.last_name}</option>)}</select></label><div className="source-employee-data"><div><small>รหัสพนักงาน</small><b>{employee?.employee_code||"—"}</b></div><div><small>ชื่อ-นามสกุล</small><b>{employee?[employee.first_name,employee.last_name].join(" "):"—"}</b></div><div><small>ตำแหน่ง</small><b>{employee?.job_title||"—"}</b></div><div><small>แผนก / ฝ่าย</small><b>{employee?.departments?.name||"—"}</b></div></div></section>
+   <section className="source-letter-section"><h2>1. วัน เวลา และสถานที่ที่กระทำความผิด</h2><div className="source-inline-grid"><label>วันที่เกิดเหตุ<input type="date" required value={value.incident_date} onChange={e=>patch({incident_date:e.target.value})}/></label><label>เวลาประมาณ<input type="time" value={value.incident_time} onChange={e=>patch({incident_time:e.target.value})}/></label><label>สถานที่เกิดเหตุ<input value={value.incident_location} onChange={e=>patch({incident_location:e.target.value})} placeholder="ระบุสถานที่"/></label></div></section>
+   <section className="source-letter-section"><h2>2. รายละเอียดการกระทำความผิด (ข้อเท็จจริงและพฤติการณ์)</h2><label>ประเภทเหตุการณ์<input required value={value.category} onChange={e=>patch({category:e.target.value})} placeholder="เช่น ขาดงาน / มาสาย / ฝ่าฝืนระเบียบ"/></label><textarea required rows={3} value={value.incident_description} onChange={e=>patch({incident_description:e.target.value})} placeholder="ระบุข้อเท็จจริง วันเวลา และพฤติการณ์อย่างชัดเจน"/></section>
+   <section className="source-letter-section"><h2>3. ข้อบังคับเกี่ยวกับการทำงาน / ระเบียบ / คำสั่งที่ฝ่าฝืน</h2><div className="source-regulation-search"><Search size={14}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="ค้นหาคำสำคัญหรือเลขข้อ เช่น 10.2.1, มาสาย, วันลา"/></div><div className="source-regulation-results">{results.map(item=><label key={item.id}><input type="checkbox" checked={ids.has(item.id)} onChange={()=>toggle(item)}/><span><b>{item.section_number||"ไม่ระบุเลขข้อ"} {item.heading}</b><small>{documents.find(d=>d.id===item.document_id)?.title||"ข้อบังคับมาตรฐานกลาง"}</small><em>{item.content_text.slice(0,160)}{item.content_text.length>160?"…":""}</em></span></label>)}{!results.length&&<small>ไม่พบข้อบังคับที่ตรงกับคำค้นหา</small>}</div>{selected.length>0&&<div className="source-selected-clauses"><b>ข้อบังคับที่เลือก ({selected.length})</b>{selected.map((x,i)=><p key={i}>{x.replace(/^\[REF:[^\]]+\]/,"")}</p>)}</div>}</section>
+   <section className="source-letter-section"><h2>4. ระดับการพิจารณาลงโทษทางวินัย</h2><div className="source-level-grid">{levels.map(([k,l])=><label key={k}><input type="radio" name="warning-level" checked={value.warning_level===k} disabled={role==="supervisor"&&k!=="verbal"} onChange={()=>patch({warning_level:k})}/>{l}</label>)}</div><label>คำชี้แจงของพนักงาน (ถ้ามี)<textarea rows={2} value={value.employee_explanation} onChange={e=>patch({employee_explanation:e.target.value})}/></label><label>แนวทางดำเนินการ / คำสั่งให้ปรับปรุงแก้ไข<textarea rows={2} value={value.proposed_action} onChange={e=>patch({proposed_action:e.target.value})}/></label></section>
+   <div className="source-legal-note">บริษัทขอให้ท่านปรับปรุงแก้ไขพฤติกรรมและปฏิบัติตามข้อบังคับเกี่ยวกับการทำงานอย่างเคร่งครัด หากมีการกระทำผิดซ้ำ บริษัทจะพิจารณาดำเนินการทางวินัยตามข้อบังคับและกฎหมายที่เกี่ยวข้อง โดยพิจารณาข้อเท็จจริงและเงื่อนไขตามกฎหมายเป็นรายกรณี</div>
+   <section className="source-signature-section"><h2>5. ลำดับการลงนามอิเล็กทรอนิกส์</h2><div className="source-signature-grid"><div><b>1. ผู้ออกหนังสือเตือน</b><small>ลงนามผ่านระบบ</small></div><div><b>2. HR Manager</b><small>ลงนามรับทราบทุกฉบับ</small></div>{value.executive_ack_required&&<div><b>3. ผู้บริหาร</b><small>ลงนามตามที่ HR กำหนด</small></div>}<div><b>{value.executive_ack_required?"4":"3"}. พนักงาน</b><small>ลงนามรับทราบเป็นขั้นตอนสุดท้าย</small></div></div>{(role==="hr_officer"||role==="system_admin")&&<label className="source-executive-toggle"><input type="checkbox" checked={value.executive_ack_required} onChange={e=>patch({executive_ack_required:e.target.checked})}/> กำหนดให้ผู้บริหารลงนามรับทราบ</label>}<label>ผู้อนุมัติ<select value={value.approver_id} onChange={e=>patch({approver_id:e.target.value})}><option value="">บันทึกเป็นฉบับร่าง</option>{approvers.map(p=><option key={p.id} value={p.id}>{p.full_name}</option>)}</select></label></section>
+   <footer className="source-letter-footer">เอกสารนี้จัดทำและลงนามผ่าน STAR LIVE WARNING SYSTEM · ลายเซ็นผูกกับบัญชีผู้ใช้งานและประวัติการลงนาม</footer>
+  </article>
+  <div className="source-letter-extra"><label>แนบหลักฐานเพิ่มเติม (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e=>onEvidenceChange(e.target.files?.[0]||null)}/>{evidenceName&&<small>{evidenceName}</small>}</label><p>ลายเซ็นจริงจะลงผ่านป๊อบอัพวาดลายเซ็นและบันทึกเข้าระบบตามลำดับผู้ลงนาม ไม่ใช่ภาพลายเซ็นตัวอย่าง</p></div>
+ </div>;
 }
-
-function ShieldCheckIcon(){return <span aria-hidden="true">✦</span>}
