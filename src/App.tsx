@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
+import WarningLetterFields, { type WarningLetterFormValue } from "./WarningLetterFields";
 
 type Section = "overview" | "employees" | "warnings" | "approvals" | "reports" | "regulations" | "settings";
 type Role = "system_admin" | "hr_officer" | "approver" | "viewer" | "supervisor" | "hr_manager" | "executive" | "employee";
@@ -26,6 +27,7 @@ type Employee = {
 type WarningCase = {
   id: string; case_number: string; employee_id: string; company_id: string; incident_date: string;
   category: string; incident_description: string; warning_level: string; status: string; executive_ack_required?: boolean;
+  incident_time?: string | null; incident_location?: string | null; employee_explanation?: string | null; proposed_action?: string | null;
   created_at: string; created_by: string; employees?: { employee_code: string; first_name: string; last_name: string } | null;
   warning_attachments?: { id: string; storage_path: string; original_file_name: string }[];
 };
@@ -268,7 +270,7 @@ function App() {
         {error && <div className="inline-error">{error}</div>}
         {section === "overview" && <Overview employees={employees} warnings={warnings} approvals={approvals} onGo={navigate} />}
         {section === "employees" && <EmployeesModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} employees={employees} departments={departments} canManage={!!canManage} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลพนักงานแล้ว"); void loadData(); }} />}
-        {section === "warnings" && <WarningsModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
+        {section === "warnings" && <WarningsModule companyId={activeCompanyId} companies={companies} onCompanyChange={setActiveCompanyId} warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} regulations={regulationSections} regulationDocuments={regulationDocuments} companyName={companies.find(c => c.id === activeCompanyId)?.company_name || "บริษัท"} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
         {section === "regulations" && <RegulationsModule categories={regulationCategories} documents={regulationDocuments} sections={regulationSections} query={search} onQueryChange={setSearch} />}
@@ -369,7 +371,7 @@ function WarningDocumentPreview({ warning, signatures, onClose }: { warning: War
   const steps=[{key:"issuer",label:"ผู้ออกหนังสือเตือน"},{key:"hr_manager_ack",label:"ผู้จัดการฝ่ายทรัพยากรบุคคล"},{key:"executive_ack",label:"ผู้บริหารรับทราบ"},{key:"employee_ack",label:"พนักงานรับทราบ"}];
   return <div className="modal-backdrop document-backdrop"><section className="document-dialog"><div className="document-toolbar no-print"><strong>ตัวอย่างหนังสือเตือน · {warning.case_number}</strong><div><button className="secondary-small" onClick={()=>window.print()}>พิมพ์ / บันทึก PDF</button><button className="close-btn" onClick={onClose}><X size={17}/></button></div></div><article className="warning-print-document"><header><h1>หนังสือเตือนพนักงาน</h1><p>WARNING LETTER</p></header><div className="document-meta"><span>เลขที่เอกสาร: {warning.case_number}</span><span>วันที่เกิดเหตุ: {new Date(warning.incident_date+"T00:00:00").toLocaleDateString("th-TH")}</span></div><p>เรื่อง: {levelLabels[warning.warning_level]||"หนังสือเตือน"}</p><p>เรียน: {employee}</p><p>ประเภทเหตุการณ์: {warning.category}</p><h3>รายละเอียดเหตุการณ์</h3><p className="document-paragraph">{warning.incident_description}</p><h3>การลงนามรับทราบและยืนยันเอกสาร</h3><div className="document-signature-grid">{steps.map(step=>{const sig=signatures.find(s=>s.warning_id===warning.id&&s.signature_step===step.key);return <div className="document-signature" key={step.key}><div className="document-signature-image">{sig?.signature_data?<img src={sig.signature_data} alt={"ลายเซ็น "+sig.signer_name}/>:<span>ยังไม่มีลายเซ็น</span>}</div><strong>{sig?.signer_name||"—"}</strong><span>{step.label}</span><small>{sig?.signed_at?new Date(sig.signed_at).toLocaleString("th-TH"):"รอลงนาม"}</small></div>;})}</div><footer>เอกสารอิเล็กทรอนิกส์ · ลายเซ็นผูกกับค่า SHA-256 ของเอกสาร ณ เวลาที่ลงนาม</footer></article></section></div>;
 }
-function WarningsModule({ companyId, companies, onCompanyChange, warnings, employees, profiles, canManage, profile, signatures, query, userId, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; onSaved: () => void }) {
+function WarningsModule({ companyId, companies, onCompanyChange, warnings, employees, profiles, canManage, profile, signatures, query, userId, regulations, regulationDocuments, companyName, onSaved }: { companyId: string; companies: Company[]; onCompanyChange: (id: string) => void; warnings: WarningCase[]; employees: Employee[]; profiles: Profile[]; canManage: boolean; profile: Profile; signatures: any[]; query: string; userId: string; regulations: RegulationSection[]; regulationDocuments: RegulationDocument[]; companyName: string; onSaved: () => void }) {
   const [signatureTarget, setSignatureTarget] = useState<{ warningId: string; step: string } | null>(null);
   const [signatureBusy, setSignatureBusy] = useState(false);
   const [previewWarning, setPreviewWarning] = useState<WarningCase | null>(null);
@@ -378,7 +380,7 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [evidence, setEvidence] = useState<File | null>(null);
-  const emptyForm = () => ({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), category: "", incident_description: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
+  const emptyForm = (): WarningLetterFormValue => ({ employee_id: "", incident_date: new Date().toISOString().slice(0, 10), incident_time: "", incident_location: "", category: "", incident_description: "", employee_explanation: "", proposed_action: "", regulation_text: "", warning_level: profile.role === "supervisor" ? "verbal" : "written_1", approver_id: "", executive_ack_required: false });
   const [form, setForm] = useState(emptyForm);
   const canCreate = canManage || profile.role === "supervisor";
   const hasSignature = (warningId: string) => signatures.some(s => s.warning_id === warningId);
@@ -392,7 +394,9 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
   function startEdit(warning: WarningCase) {
     if (!canEditDraft(warning)) return;
     setEditingId(warning.id);
-    setForm({ employee_id: warning.employee_id, incident_date: warning.incident_date, category: warning.category, incident_description: warning.incident_description, warning_level: warning.warning_level, approver_id: "", executive_ack_required: !!warning.executive_ack_required });
+    const splitMarker = "\n\n[ข้อบังคับที่เกี่ยวข้อง]\n";
+    const parts = warning.incident_description.split(splitMarker);
+    setForm({ employee_id: warning.employee_id, incident_date: warning.incident_date, incident_time: warning.incident_time || "", incident_location: warning.incident_location || "", category: warning.category, incident_description: parts[0], regulation_text: parts[1] || "", employee_explanation: warning.employee_explanation || "", proposed_action: warning.proposed_action || "", warning_level: warning.warning_level, approver_id: "", executive_ack_required: !!warning.executive_ack_required });
     setEvidence(null); setError(""); setShowForm(true);
   }
   async function createEditableCopy(warning: WarningCase) {
@@ -425,8 +429,8 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
       const target = warnings.find(w => w.id === editingId);
       if (!target || !canEditDraft(target)) { setError("ไม่มีสิทธิ์แก้ไข หรือหนังสือเตือนไม่อยู่ในสถานะฉบับร่างแล้ว"); setBusy(false); return; }
       const { data: updatedWarning, error: updateError } = await supabase.from("warning_cases").update({
-        employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
-        category: form.category, incident_description: form.incident_description,
+        employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date, incident_time: form.incident_time || null, incident_location: form.incident_location || null,
+        category: form.category, incident_description: form.incident_description + (form.regulation_text ? "\n\n[ข้อบังคับที่เกี่ยวข้อง]\n" + form.regulation_text : ""), employee_explanation: form.employee_explanation || null, proposed_action: form.proposed_action || null,
         warning_level: form.warning_level,
         executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false,
         status: form.approver_id ? "pending_approval" : "draft", updated_by: userId, updated_at: new Date().toISOString(),
@@ -435,8 +439,8 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
     } else {
       const caseNumber = "WRN-" + new Date().toISOString().slice(0, 10).replaceAll("-", "") + "-" + Date.now().toString().slice(-6);
       const { data, error: insertError } = await supabase.from("warning_cases").insert({
-        case_number: caseNumber, employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date,
-        category: form.category, incident_description: form.incident_description,
+        case_number: caseNumber, employee_id: form.employee_id, company_id: companyId, incident_date: form.incident_date, incident_time: form.incident_time || null, incident_location: form.incident_location || null,
+        category: form.category, incident_description: form.incident_description + (form.regulation_text ? "\n\n[ข้อบังคับที่เกี่ยวข้อง]\n" + form.regulation_text : ""), employee_explanation: form.employee_explanation || null, proposed_action: form.proposed_action || null,
         warning_level: form.warning_level, executive_ack_required: profile.role === "hr_officer" || profile.role === "system_admin" ? form.executive_ack_required : false,
         status: form.approver_id ? "pending_approval" : "draft", created_by: userId,
       }).select("id").single();
@@ -495,17 +499,10 @@ function WarningsModule({ companyId, companies, onCompanyChange, warnings, emplo
 
   return <>
     <div className="toolbar"><div><strong>ทะเบียนหนังสือเตือน</strong><span>{filtered.length} รายการ</span></div>{canCreate && <button className="primary-small" onClick={() => { closeForm(); setShowForm(true); }}><Plus size={16} /> สร้างหนังสือเตือน</button>}</div>
-    {showForm && <form className="form-panel" onSubmit={save}><div className="form-head"><strong>{editingId ? "แก้ไขหนังสือเตือนฉบับร่าง" : "บันทึกเหตุการณ์และเสนออนุมัติ"}</strong><button type="button" className="close-btn" onClick={closeForm}><X size={17} /></button></div><div className="form-grid">
-      <label>บริษัท<select value={companyId} disabled={!!editingId} onChange={e => { setForm({ ...form, employee_id: "" }); onCompanyChange(e.target.value); }}>{companies.map(company => <option key={company.id} value={company.id}>{company.company_name}</option>)}</select></label>
-      <label className="span-2">พนักงาน<select required value={form.employee_id} onChange={e => setForm({ ...form, employee_id: e.target.value })}><option value="">เลือกพนักงาน</option>{employees.filter(x => x.status === "active").map(x => <option key={x.id} value={x.id}>{x.employee_code} · {x.first_name} {x.last_name}</option>)}</select></label>
-      <label>วันที่เกิดเหตุ<input type="date" required value={form.incident_date} onChange={e => setForm({ ...form, incident_date: e.target.value })} /></label>
-      <label>ประเภทเหตุการณ์<input required value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="เช่น ขาดงาน / มาสาย / ฝ่าฝืนระเบียบ" /></label>
-      <label>ระดับการเตือน<select value={form.warning_level} disabled={profile.role === "supervisor"} onChange={e => setForm({ ...form, warning_level: e.target.value })}>{Object.entries(levelLabels).filter(([v]) => profile.role !== "supervisor" || v === "verbal").map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-      <label>ผู้อนุมัติ<select value={form.approver_id} onChange={e => setForm({ ...form, approver_id: e.target.value })}><option value="">บันทึกเป็นฉบับร่าง</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.full_name} ({roleLabels[p.role]})</option>)}</select></label>
-      <label className="span-2">รายละเอียดเหตุการณ์<textarea required rows={4} value={form.incident_description} onChange={e => setForm({ ...form, incident_description: e.target.value })} /></label>
-      <label className="span-2">แนบหลักฐานเพิ่มเติม (PDF / JPG / PNG ไม่เกิน 10 MB)<input type="file" accept=".pdf,image/jpeg,image/png" onChange={e => setEvidence(e.target.files?.[0] || null)} /></label>
-      {(profile.role === "hr_officer" || profile.role === "system_admin") && <label className="span-2"><input type="checkbox" checked={form.executive_ack_required} onChange={e => setForm({ ...form, executive_ack_required: e.target.checked })} /> กำหนดให้ผู้บริหารลงนามรับทราบหนังสือฉบับนี้</label>}
-    </div>{error && <p className="error-text">{error}</p>}<button className="primary-btn" disabled={busy || !employees.length}>{busy ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "บันทึกข้อมูล"}</button>{!employees.length && <p className="small-note">กรุณาเพิ่มข้อมูลพนักงานก่อนสร้างหนังสือเตือน</p>}</form>}
+    {showForm && <form className="form-panel warning-letter-form-panel" onSubmit={save}><div className="form-head"><strong>{editingId ? "แก้ไขหนังสือเตือนฉบับร่าง" : "สร้างหนังสือเตือน"}</strong><button type="button" className="close-btn" onClick={closeForm}><X size={17} /></button></div>
+      <WarningLetterFields value={form} onChange={setForm} employees={employees} regulations={regulations} documents={regulationDocuments} companyName={companyName} approvers={profiles} role={profile.role} onEvidenceChange={setEvidence} evidenceName={evidence?.name}/>
+      {error && <p className="error-text">{error}</p>}<div className="letter-form-actions"><button className="primary-btn" disabled={busy || !employees.length}>{busy ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "บันทึกหนังสือเตือน"}</button><button type="button" className="secondary-small" onClick={closeForm}>ยกเลิก</button></div>
+      {!employees.length && <p className="small-note">กรุณาเพิ่มข้อมูลพนักงานก่อนสร้างหนังสือเตือน</p>}</form>}
     <div className="table-wrap"><table><thead><tr><th>เลขที่เอกสาร</th><th>พนักงาน</th><th>วันที่เกิดเหตุ</th><th>ประเภท / ระดับ</th><th>สถานะ</th><th>การดำเนินการ</th></tr></thead><tbody>{filtered.map(w => <tr key={w.id}><td className="mono">{w.case_number}</td><td>{w.employees?.first_name} {w.employees?.last_name}</td><td>{new Date(w.incident_date).toLocaleDateString("th-TH")}</td><td>{w.category}<small className="cell-sub">{levelLabels[w.warning_level]}</small></td><td><StatusPill status={w.status} /></td><td><button className="table-action" onClick={() => setPreviewWarning(w)}>เปิดดูเอกสาร</button>{profile.role === "system_admin" && <button className="table-action danger-action" disabled={busy} onClick={() => void deleteWarning(w)}>ลบใบเตือน</button>}{w.warning_attachments?.map(a => <button key={a.id} className="table-action" onClick={() => void openEvidence(a.storage_path)}>{a.original_file_name}</button>)}{canEditDraft(w) && <button className="table-action" onClick={() => startEdit(w)}>แก้ไขฉบับร่าง</button>}{canCreateDraftRevision(w) && <button className="table-action" onClick={() => void createEditableCopy(w)}>สร้างฉบับร่างเพื่อแก้ไข</button>}{w.status === "draft" && hasSignature(w.id) && <small className="cell-sub">มีลายเซ็นแล้ว · เอกสารเดิมไม่สามารถแก้ไขได้</small>}{w.status === "approved" && (profile.role === "supervisor" || profile.role === "hr_officer") && !signatures.some(s => s.warning_id === w.id && s.signature_step === "issuer") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"issuer"})}>ลงนามผู้ออก</button>}{profile.role === "hr_manager" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "hr_manager_ack") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"hr_manager_ack"})}>ลงนาม HR Manager</button>}{profile.role === "executive" && w.executive_ack_required && !signatures.some(s => s.warning_id === w.id && s.signature_step === "executive_ack") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"executive_ack"})}>ลงนามผู้บริหาร</button>}{profile.role === "employee" && profile.employee_id === w.employee_id && w.status === "issued" && !signatures.some(s => s.warning_id === w.id && s.signature_step === "employee_ack") && <button className="table-action" onClick={() => setSignatureTarget({warningId:w.id,step:"employee_ack"})}>ลงนามรับทราบ</button>}</td></tr>)}</tbody></table>{!filtered.length && <EmptyState title="ยังไม่มีหนังสือเตือน" detail="รายการที่สร้างจะแสดงในตารางนี้" />}</div>
     {signatureTarget && <SignaturePadDialog signerName={profile.full_name} stepLabel={({issuer:"ผู้ออกหนังสือเตือน",hr_manager_ack:"ผู้จัดการฝ่ายทรัพยากรบุคคล",executive_ack:"ผู้บริหารรับทราบ",employee_ack:"พนักงานรับทราบ"} as Record<string,string>)[signatureTarget.step]} busy={signatureBusy} onCancel={()=>setSignatureTarget(null)} onConfirm={data=>void sign(signatureTarget.warningId,signatureTarget.step,data)}/>}
     {previewWarning && <WarningDocumentPreview warning={previewWarning} signatures={signatures} onClose={()=>setPreviewWarning(null)}/>}
