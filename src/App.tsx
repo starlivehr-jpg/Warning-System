@@ -169,6 +169,12 @@ function App() {
     if (e) notify("เปลี่ยนสิทธิ์ไม่สำเร็จ: " + e.message); else { notify("ปรับสิทธิ์ผู้ใช้งานแล้ว"); void loadData(); }
   }
 
+  async function updateProfileEmployee(userId: string, employeeId: string) {
+    if (!supabase || !isAdmin) return;
+    const { error: e } = await supabase.from("profiles").update({ employee_id: employeeId || null, updated_at: new Date().toISOString() }).eq("id", userId);
+    if (e) notify("เชื่อมบัญชีกับพนักงานไม่สำเร็จ: " + e.message); else { notify("เชื่อมบัญชีผู้ใช้งานกับพนักงานแล้ว"); void loadData(); }
+  }
+
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark small"><ShieldCheck size={22} /></div><div><strong>STAR LIVE</strong><span>WARNING SYSTEM</span></div></div>
@@ -186,7 +192,7 @@ function App() {
         {section === "warnings" && <WarningsModule warnings={warnings} employees={employees} profiles={profiles.filter(p => p.is_active && (p.role === "approver" || p.role === "system_admin"))} canManage={!!canManage} profile={profile} signatures={signatures} query={search} userId={session.user.id} onSaved={() => { notify("บันทึกข้อมูลหนังสือเตือนแล้ว"); void loadData(); }} />}
         {section === "approvals" && <ApprovalsModule approvals={approvals} canManage={!!canManage} onSaved={() => { notify("บันทึกผลการพิจารณาแล้ว"); void loadData(); }} />}
         {section === "reports" && <ReportsModule employees={employees} warnings={warnings} />}
-        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} onRoleChange={updateEmployeeRole} onBootstrap={loadData} />}
+        {section === "settings" && <SettingsModule profile={profile} profiles={profiles} employees={employees} onRoleChange={updateEmployeeRole} onEmployeeLink={updateProfileEmployee} onBootstrap={loadData} />}
       </section>
     </main>
     {toast && <div className="toast-message"><CheckCircle2 size={17} />{toast}</div>}
@@ -324,9 +330,9 @@ function ReportsModule({ employees, warnings }: { employees: Employee[]; warning
   </>;
 }
 
-function SettingsModule({ profile, profiles, onRoleChange, onBootstrap }: { profile: Profile; profiles: Profile[]; onRoleChange: (id: string, role: Role) => void; onBootstrap: () => Promise<void> }) {
+function SettingsModule({ profile, profiles, employees, onRoleChange, onEmployeeLink, onBootstrap }: { profile: Profile; profiles: Profile[]; employees: Employee[]; onRoleChange: (id: string, role: Role) => void; onEmployeeLink: (id: string, employeeId: string) => void; onBootstrap: () => Promise<void> }) {
   return <><article className="panel settings-profile"><div className="avatar large">{profile.full_name.slice(0, 1)}</div><div><h3>{profile.full_name}</h3><p>{roleLabels[profile.role]} · {profile.is_active ? "ใช้งานอยู่" : "ระงับ"}</p></div></article>
-    {profile.role === "system_admin" ? <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>บัญชีใหม่จะเริ่มต้นเป็นผู้ดูข้อมูล ผู้ดูแลสามารถปรับบทบาทได้</p></div><Users size={19} /></div><div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th></tr></thead><tbody>{profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td></tr>)}</tbody></table></div></article> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
+    {profile.role === "system_admin" ? <article className="panel settings-users"><div className="panel-head"><div><h3>จัดการสิทธิ์ผู้ใช้งาน</h3><p>บัญชีใหม่จะเริ่มต้นเป็นผู้ดูข้อมูล ผู้ดูแลสามารถปรับบทบาทได้</p></div><Users size={19} /></div><div className="table-wrap"><table><thead><tr><th>ชื่อผู้ใช้งาน</th><th>สิทธิ์ปัจจุบัน</th><th>กำหนดสิทธิ์</th><th>เชื่อมข้อมูลพนักงาน</th></tr></thead><tbody>{profiles.map(p => <tr key={p.id}><td>{p.full_name}{p.id === profile.id ? " (บัญชีนี้)" : ""}</td><td>{roleLabels[p.role]}</td><td><select value={p.role} disabled={p.id === profile.id} onChange={e => onRoleChange(p.id, e.target.value as Role)}>{Object.entries(roleLabels).map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></td><td>{p.role === "employee" ? <select value={p.employee_id || ""} onChange={e => onEmployeeLink(p.id, e.target.value)}><option value="">เลือกพนักงาน</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.employee_code} · {employee.first_name} {employee.last_name}</option>)}</select> : "—"}</td></tr>)}</tbody></table></div></article> : <article className="panel"><h3>สิทธิ์และความปลอดภัย</h3><p className="muted">การเปลี่ยนบทบาทผู้ใช้งานดำเนินการได้โดยผู้ดูแลระบบเท่านั้น</p></article>}
     <article className="panel"><div className="panel-head"><div><h3>การเริ่มต้นผู้ดูแลระบบ</h3><p>ใช้ได้ครั้งเดียวในช่วงติดตั้งระบบเท่านั้น</p></div><ShieldCheck size={19} /></div><p className="small-note">การตั้งค่าผู้ดูแลครั้งแรกจะปิดถาวรเมื่อมีบัญชีผู้ดูแลระบบแล้ว</p><BootstrapAdmin onDone={onBootstrap} /></article>
   </>;
 }
