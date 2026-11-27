@@ -41,18 +41,7 @@ create table if not exists public.regulation_documents (
   updated_at timestamptz not null default now()
 );
 
-do $
-begin
-  if not exists (
-    select 1 from pg_constraint
-    where conname='regulation_documents_id_company_unique'
-      and conrelid='public.regulation_documents'::regclass
-  ) then
-    alter table public.regulation_documents
-      add constraint regulation_documents_id_company_unique unique (id, company_id);
-  end if;
-end;
-$;
+alter table public.regulation_documents add constraint regulation_documents_id_company_unique unique (id, company_id);
 
 create table if not exists public.regulation_sections (
   id uuid primary key default gen_random_uuid(),
