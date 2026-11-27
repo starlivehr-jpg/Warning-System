@@ -245,3 +245,22 @@
  .source-a4-preview{width:210mm!important;min-height:297mm!important;margin:0!important;padding:12mm 14mm!important;box-shadow:none!important;border:0!important}
  .source-letter-workspace,.source-letter-toolbar,.source-letter-extra{display:none!important}
 }
+
+
+/* Render the user's original warning_letter.html as the actual document, not a recreated approximation */
+.source-template-iframe{display:block;width:100%;height:1320px;min-width:820px;border:0;background:#f1f5f9;border-radius:6px}
+.source-letter-workspace{width:100%;display:flex;flex-direction:column;gap:12px;overflow-x:auto}
+.source-workflow-controls{display:flex;flex-direction:column;gap:12px;width:100%;box-sizing:border-box}
+.source-workflow-row{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr);align-items:end;gap:14px}
+.source-workflow-row label,.source-evidence-control{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#42566a}
+.source-workflow-row select,.source-evidence-control input{width:100%;min-height:36px;border:1px solid #d5dee7;border-radius:6px;background:#fff;padding:7px 9px;font:inherit;color:#1e293b}
+.source-exec-control{display:flex!important;flex-direction:row!important;align-items:center;gap:8px;min-height:36px}
+.source-exec-control input{width:15px;height:15px;flex:none}
+.source-evidence-control small{color:#64748b}
+@media(max-width:760px){.source-workflow-row{grid-template-columns:1fr}.source-template-iframe{height:1320px}}
+.source-document-dialog{width:min(230mm,96vw)!important;max-width:230mm!important;max-height:94vh!important;overflow:auto!important;padding:12px!important;background:#eef2f6!important}
+.source-document-dialog .source-letter-workspace{align-items:center}
+.source-document-dialog .source-template-iframe{width:210mm;max-width:100%;height:1320px;min-width:820px;background:#fff}
+@media print{
+ .source-template-iframe{height:297mm!important;min-width:0!important;width:210mm!important;overflow:visible!important}
+}
