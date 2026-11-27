@@ -63,3 +63,23 @@
 .danger-action{color:#b42318!important;border-color:#f2c4c0!important;background:#fff8f7!important}
 .danger-action:hover:not(:disabled){background:#feeceb!important;border-color:#e5a19b!important}
 .danger-action:disabled{opacity:.5;cursor:not-allowed}
+
+/* Word-source regulation presentation */
+.regulation-layout{display:grid;grid-template-columns:minmax(230px,280px) minmax(0,1fr);gap:18px;align-items:start}
+.regulation-documents{position:sticky;top:84px;max-height:calc(100vh - 180px);overflow:auto;padding:16px}
+.regulation-document{padding:12px 0;border-bottom:1px solid #e8edf2}
+.regulation-document strong{display:block;font-size:13px}
+.regulation-document small,.regulation-document .source-status{display:block;margin-top:5px}
+.regulation-results{min-width:0}
+.regulation-section{margin-bottom:16px;overflow:hidden}
+.regulation-section-head{padding:16px 20px;border-bottom:1px solid #e8edf2;background:#fbfcfe}
+.regulation-content.regulation-document-page{padding:26px 34px;background:#fff;color:#27384b;font-size:14px;line-height:1.8;max-height:none;overflow:visible;white-space:normal}
+.regulation-paragraph{display:grid;grid-template-columns:minmax(56px,auto) minmax(0,1fr);gap:12px;margin:0 0 5px;align-items:start;break-inside:avoid}
+.regulation-paragraph.title{display:block;text-align:center;font-weight:700;font-size:16px;margin:4px 0 18px}
+.regulation-paragraph.heading{display:block;font-weight:600;margin:16px 0 7px}
+.regulation-paragraph.body{padding-left:28px}
+.regulation-number{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.regulation-paragraph-text{min-width:0;overflow-wrap:anywhere}
+.regulation-fallback-text{white-space:pre-wrap;line-height:1.9}
+@media(max-width:900px){.regulation-layout{grid-template-columns:1fr}.regulation-documents{position:static;max-height:280px}.regulation-content.regulation-document-page{padding:18px;font-size:13px}}
+@media(max-width:560px){.regulation-paragraph{grid-template-columns:minmax(44px,auto) minmax(0,1fr);gap:8px}.regulation-paragraph.body{padding-left:8px}}
